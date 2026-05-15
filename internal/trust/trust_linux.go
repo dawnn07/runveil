@@ -89,8 +89,9 @@ func nssDBPath() string {
 
 // ManualInstructions returns shell commands the user can run by hand.
 func ManualInstructions(caPath string) string {
+	q := shellQuote(caPath)
 	return fmt.Sprintf(`sudo cp %s /usr/local/share/ca-certificates/railcore.crt && sudo update-ca-certificates
 # or, per-user (Firefox/Chrome NSS):
 certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n railcore -i %s
-`, caPath, caPath)
+`, q, q)
 }

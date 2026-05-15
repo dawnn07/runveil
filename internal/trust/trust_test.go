@@ -29,3 +29,19 @@ func TestManualInstructions_NonEmpty(t *testing.T) {
 		t.Fatal("ManualInstructions returned empty string")
 	}
 }
+
+func TestShellQuote(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", "''"},
+		{"/usr/local/ca.crt", "'/usr/local/ca.crt'"},
+		{"/Users/Some User/ca.crt", "'/Users/Some User/ca.crt'"},
+		{"can't.crt", `'can'\''t.crt'`},
+	}
+	for _, tc := range cases {
+		if got := shellQuote(tc.in); got != tc.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

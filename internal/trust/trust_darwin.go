@@ -48,8 +48,9 @@ func homeKeychain() string {
 
 // ManualInstructions returns shell commands the user can run by hand.
 func ManualInstructions(caPath string) string {
+	q := shellQuote(caPath)
 	return fmt.Sprintf(`sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain %s
 # or, per-user:
 security add-trusted-cert -r trustRoot -k ~/Library/Keychains/login.keychain-db %s
-`, caPath, caPath)
+`, q, q)
 }

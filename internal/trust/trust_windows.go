@@ -40,6 +40,8 @@ func (w *windowsInstaller) Status(_ string) (bool, string, error) {
 }
 
 // ManualInstructions returns shell commands the user can run by hand.
+// Windows paths are double-quoted so spaces are handled; embedded double
+// quotes in caPath (rare on Windows) would still break the output.
 func ManualInstructions(caPath string) string {
 	return fmt.Sprintf(`# As Administrator:
 certutil -addstore -f Root "%s"
