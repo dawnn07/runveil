@@ -1,0 +1,18 @@
+# Binaries
+/railcore
+/railcore.exe
+/dist/
+
+# Go build cache
+*.test
+*.out
+coverage.txt
+
+# Local CA generated during dev runs
+.railcore-data/
+~/.railcore/
+
+# IDE
+.vscode/
+.idea/
+*.swp
