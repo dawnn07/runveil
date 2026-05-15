@@ -39,6 +39,12 @@ type CA struct {
 
 // GenerateOrLoad returns a CA backed by ca.crt + ca.key under dir, creating
 // them on first use. The directory is created with mode 0700 if missing.
+//
+// GenerateOrLoad is NOT safe for concurrent calls on the same directory:
+// two simultaneous invocations on a fresh dir may both generate roots and
+// race to overwrite each other's files. Callers must serialize. In Railcore
+// the only caller is the binary entrypoint, which invokes it once at
+// startup before the proxy accepts connections.
 func GenerateOrLoad(dir string) (*CA, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create ca dir: %w", err)
@@ -119,6 +125,9 @@ func loadRoot(dir, certPath, keyPath string) (*CA, error) {
 	cert, err := x509.ParseCertificate(certBlock.Bytes)
 	if err != nil {
 		return nil, fmt.Errorf("parse cert: %w", err)
+	}
+	if !cert.IsCA {
+		return nil, fmt.Errorf("loaded cert at %s is not a CA (IsCA=false)", certPath)
 	}
 
 	keyBlock, _ := pem.Decode(keyPEM)
