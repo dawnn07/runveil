@@ -3,8 +3,13 @@ package proxy
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -60,5 +65,49 @@ func TestProxy_RejectsConnectToNon443(t *testing.T) {
 	}
 	if !strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
 		t.Fatalf("expected JSON error body, got Content-Type=%q", resp.Header.Get("Content-Type"))
+	}
+}
+
+func TestProxy_InterceptsAndForwardsGET(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "hello-from-upstream")
+	}))
+	t.Cleanup(upstream.Close)
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+	upstreamPool := x509.NewCertPool()
+	upstreamPool.AddCert(upstream.Certificate())
+
+	srv, addr := newTestServer(t)
+	srv.cfg.UpstreamTLS = &tls.Config{RootCAs: upstreamPool, ServerName: upstreamURL.Hostname()}
+	srv.cfg.UpstreamResolver = func(_ string) (string, error) { return upstreamURL.Host, nil }
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(srv.cfg.CA.RootCert())
+	proxyURL, _ := url.Parse("http://" + addr)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "example.test"},
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get("https://example.test/")
+	if err != nil {
+		t.Fatalf("client.Get: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if string(body) != "hello-from-upstream" {
+		t.Fatalf("body = %q, want hello-from-upstream", string(body))
+	}
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
 }

@@ -4,6 +4,7 @@ package proxy
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,15 @@ type Config struct {
 	Pipeline     *pipeline.Chain    // request pipeline
 	MaxBodyBytes int64              // cap per-request body (default 32 MiB)
 	Logger       *slog.Logger       // optional; defaults to slog.Default()
+
+	// UpstreamTLS, if non-nil, is used when dialling upstream. Default is
+	// a tls.Config that uses the system root store.
+	UpstreamTLS *tls.Config
+
+	// UpstreamResolver, if non-nil, maps a CONNECT host (e.g. api.openai.com)
+	// to the actual upstream host:port to dial. Used in tests to point the
+	// proxy at httptest servers. nil means dial host:443 directly.
+	UpstreamResolver func(host string) (string, error)
 }
 
 // Server is the Railcore forward HTTPS proxy.
@@ -108,12 +118,6 @@ func (s *Server) handleConn(ctx context.Context, raw net.Conn) {
 	}
 }
 
-// handleIntercepted is implemented in intercept.go.
-//
-// Placeholder so server.go compiles standalone; real impl in next task.
-func (s *Server) handleIntercepted(_ context.Context, _ net.Conn, _ string, _ string) error {
-	return fmt.Errorf("not implemented yet")
-}
 
 func writeJSONError(w io.Writer, status int, msg string, kvs ...string) {
 	body := map[string]any{"error": msg}
