@@ -84,3 +84,93 @@ func TestRootPath_PointsAtCertFile(t *testing.T) {
 		t.Fatalf("RootPath = %q, want %q", got, want)
 	}
 }
+
+func TestMintLeaf_ContainsHostSANAndChainsToRoot(t *testing.T) {
+	dir := t.TempDir()
+	c, err := GenerateOrLoad(dir)
+	if err != nil {
+		t.Fatalf("GenerateOrLoad: %v", err)
+	}
+
+	tlsCert, err := c.MintLeaf("api.openai.com")
+	if err != nil {
+		t.Fatalf("MintLeaf: %v", err)
+	}
+	if len(tlsCert.Certificate) == 0 {
+		t.Fatal("tls.Certificate.Certificate is empty")
+	}
+
+	leaf, err := x509.ParseCertificate(tlsCert.Certificate[0])
+	if err != nil {
+		t.Fatalf("parse leaf: %v", err)
+	}
+
+	found := false
+	for _, san := range leaf.DNSNames {
+		if san == "api.openai.com" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("leaf DNS SANs = %v, want to contain api.openai.com", leaf.DNSNames)
+	}
+
+	pool := x509.NewCertPool()
+	pool.AddCert(c.rootCert)
+	if _, err := leaf.Verify(x509.VerifyOptions{Roots: pool}); err != nil {
+		t.Fatalf("leaf did not chain to root: %v", err)
+	}
+}
+
+func TestMintLeaf_CachesByHost(t *testing.T) {
+	c, err := GenerateOrLoad(t.TempDir())
+	if err != nil {
+		t.Fatalf("GenerateOrLoad: %v", err)
+	}
+	a, err := c.MintLeaf("api.openai.com")
+	if err != nil {
+		t.Fatalf("first MintLeaf: %v", err)
+	}
+	b, err := c.MintLeaf("api.openai.com")
+	if err != nil {
+		t.Fatalf("second MintLeaf: %v", err)
+	}
+	// Pointer equality: same cached cert returned both times.
+	if a != b {
+		t.Fatal("expected same *tls.Certificate from cache; got different pointers")
+	}
+}
+
+func TestMintLeaf_ConcurrentSameHostReturnsSingleCert(t *testing.T) {
+	c, err := GenerateOrLoad(t.TempDir())
+	if err != nil {
+		t.Fatalf("GenerateOrLoad: %v", err)
+	}
+	const n = 32
+	results := make(chan any, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			cert, err := c.MintLeaf("api.openai.com")
+			if err != nil {
+				results <- err
+				return
+			}
+			results <- cert
+		}()
+	}
+	var first any
+	for i := 0; i < n; i++ {
+		r := <-results
+		if err, ok := r.(error); ok {
+			t.Fatalf("MintLeaf error: %v", err)
+		}
+		if first == nil {
+			first = r
+			continue
+		}
+		if r != first {
+			t.Fatal("concurrent MintLeaf for same host returned different certs")
+		}
+	}
+}
