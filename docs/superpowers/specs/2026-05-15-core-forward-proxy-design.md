@@ -372,3 +372,23 @@ Sub-project #1 is complete when:
 4. The design doc and implementation are committed to the repo. README is a placeholder (full README is launch-prep work).
 
 When these four hold, sub-project #2 (request parsing + secret detection) can begin building on this foundation.
+
+---
+
+## 10. Acceptance Result (Task 17)
+
+**Date:** 2026-05-17 (Linux, dev machine)
+
+**Tools exercised:**
+
+| Tool | Result | Notes |
+|---|---|---|
+| `curl --proxy --cacert` to `api.openai.com` | ✓ pass | HEAD / returned 421 as expected. Confirmed CONNECT + TLS interception + system-trust-store upstream dial all work. |
+| Claude Code (via `HTTPS_PROXY` + `NODE_EXTRA_CA_CERTS`) | ✓ pass | End-to-end AI completion flowed through Railcore. Proxy log showed `host=api.anthropic.com decision=continue status=200`. |
+| Antigravity (Google) | ✗ partial / blocked | Honors `HTTPS_PROXY` but bundled Google + Microsoft SDKs pin certificates on `oauth2.googleapis.com`, `lh3.googleusercontent.com`, `antigravity-unleash.goog`, `*.events.data.microsoft.com`, `*.exp-tas.com`. Auth bootstrap fails under MITM; Gemini API request is never attempted. |
+
+**Implications:**
+
+- Sub-project #1 meets its done definition: an AI coding tool successfully completes a real-world AI request through Railcore (Claude Code → Anthropic API).
+- **Cert pinning is the #1 critical risk from [part1.md](../../../part1.md) §9.1, now confirmed in the wild on Antigravity.** Practical mitigation is a future "API-key proxy mode" or selective passthrough for pinned endpoints — out of scope for sub-project #1, but a known constraint for future product strategy.
+- Cross-tool positioning is real: Cursor-class and Claude-Code-class tools work today; bundled-SDK tools like Antigravity require vendor cooperation or a different interception strategy.
