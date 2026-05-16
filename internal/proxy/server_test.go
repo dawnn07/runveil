@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -109,5 +110,55 @@ func TestProxy_InterceptsAndForwardsGET(t *testing.T) {
 	}
 	if resp.StatusCode != 200 {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+type alwaysBlockStage struct{}
+
+func (alwaysBlockStage) Name() string { return "always-block" }
+func (alwaysBlockStage) Process(_ context.Context, _ *pipeline.RequestCtx) (pipeline.Decision, error) {
+	return pipeline.Block, nil
+}
+
+func TestProxy_BlockReturns403AndSkipsUpstream(t *testing.T) {
+	var upstreamHits int32
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&upstreamHits, 1)
+		_, _ = io.WriteString(w, "should-not-reach")
+	}))
+	t.Cleanup(upstream.Close)
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+	upstreamPool := x509.NewCertPool()
+	upstreamPool.AddCert(upstream.Certificate())
+
+	srv, addr := newTestServer(t)
+	srv.cfg.UpstreamTLS = &tls.Config{RootCAs: upstreamPool, ServerName: upstreamURL.Hostname()}
+	srv.cfg.UpstreamResolver = func(_ string) (string, error) { return upstreamURL.Host, nil }
+	srv.cfg.Pipeline.Register(alwaysBlockStage{})
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(srv.cfg.CA.RootCert())
+	proxyURL, _ := url.Parse("http://" + addr)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "blocked.test"},
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get("https://blocked.test/")
+	if err != nil {
+		t.Fatalf("client.Get: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	if got := atomic.LoadInt32(&upstreamHits); got != 0 {
+		t.Fatalf("upstream was dialled %d times; expected 0", got)
 	}
 }
