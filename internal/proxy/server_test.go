@@ -162,3 +162,34 @@ func TestProxy_BlockReturns403AndSkipsUpstream(t *testing.T) {
 		t.Fatalf("upstream was dialled %d times; expected 0", got)
 	}
 }
+
+func TestProxy_OversizedBodyReturns413(t *testing.T) {
+	srv, addr := newTestServer(t)
+	srv.cfg.MaxBodyBytes = 1024 // 1 KiB cap for the test
+	srv.cfg.UpstreamResolver = func(_ string) (string, error) {
+		return "127.0.0.1:1", nil // unreachable; should never be dialled
+	}
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(srv.cfg.CA.RootCert())
+	proxyURL, _ := url.Parse("http://" + addr)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "big.test"},
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	body := strings.Repeat("A", 2048) // exceeds the 1 KiB cap
+	resp, err := client.Post("https://big.test/", "text/plain", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("client.Post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413", resp.StatusCode)
+	}
+}
