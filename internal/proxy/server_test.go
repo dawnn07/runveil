@@ -117,6 +117,13 @@ func TestProxy_InterceptsAndForwardsGET(t *testing.T) {
 	}
 }
 
+type alwaysPanicStage struct{}
+
+func (alwaysPanicStage) Name() string { return "always-panic" }
+func (alwaysPanicStage) Process(_ context.Context, _ *pipeline.RequestCtx) (pipeline.Decision, error) {
+	panic("intentional test panic")
+}
+
 type alwaysBlockStage struct{}
 
 func (alwaysBlockStage) Name() string { return "always-block" }
@@ -147,7 +154,7 @@ func TestProxy_BlockReturns403AndSkipsUpstream(t *testing.T) {
 
 	client := &http.Client{
 		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
+			Proxy:           http.ProxyURL(proxyURL),
 			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "blocked.test"},
 		},
 		Timeout: 5 * time.Second,
@@ -180,7 +187,7 @@ func TestProxy_OversizedBodyReturns413(t *testing.T) {
 
 	client := &http.Client{
 		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
+			Proxy:           http.ProxyURL(proxyURL),
 			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "big.test"},
 		},
 		Timeout: 5 * time.Second,
@@ -231,7 +238,7 @@ func TestProxy_SSEStreamsIncrementally(t *testing.T) {
 
 	client := &http.Client{
 		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
+			Proxy:           http.ProxyURL(proxyURL),
 			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "sse.test"},
 		},
 		Timeout: 10 * time.Second,
@@ -261,6 +268,47 @@ func TestProxy_SSEStreamsIncrementally(t *testing.T) {
 		}
 		// Skip the blank separator line.
 		_, _ = reader.ReadString('\n')
+	}
+}
+
+func TestProxy_StagePanicIsFailOpen(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	t.Cleanup(upstream.Close)
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+	upstreamPool := x509.NewCertPool()
+	upstreamPool.AddCert(upstream.Certificate())
+
+	srv, addr := newTestServer(t)
+	srv.cfg.UpstreamTLS = &tls.Config{RootCAs: upstreamPool, ServerName: upstreamURL.Hostname()}
+	srv.cfg.UpstreamResolver = func(_ string) (string, error) { return upstreamURL.Host, nil }
+	srv.cfg.Pipeline.Register(alwaysPanicStage{})
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(srv.cfg.CA.RootCert())
+	proxyURL, _ := url.Parse("http://" + addr)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "panic.test"},
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get("https://panic.test/")
+	if err != nil {
+		t.Fatalf("client.Get: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d, want 200 (fail-open)", resp.StatusCode)
+	}
+	if string(body) != "ok" {
+		t.Fatalf("body = %q, want ok", string(body))
 	}
 }
 
@@ -301,7 +349,7 @@ func TestProxy_ConcurrentRequestsNoLeaks(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			tr := &http.Transport{
-				Proxy: http.ProxyURL(proxyURL),
+				Proxy:           http.ProxyURL(proxyURL),
 				TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "concurrent.test"},
 			}
 			client := &http.Client{

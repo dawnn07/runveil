@@ -23,11 +23,11 @@ import (
 
 // Config configures a Server. All fields are required unless documented.
 type Config struct {
-	Addr         string             // e.g. "127.0.0.1:9443"
-	CA           *ca.CA             // local CA for minting leaves
-	Pipeline     *pipeline.Chain    // request pipeline
-	MaxBodyBytes int64              // cap per-request body (default 32 MiB)
-	Logger       *slog.Logger       // optional; defaults to slog.Default()
+	Addr         string          // e.g. "127.0.0.1:9443"
+	CA           *ca.CA          // local CA for minting leaves
+	Pipeline     *pipeline.Chain // request pipeline
+	MaxBodyBytes int64           // cap per-request body (default 32 MiB)
+	Logger       *slog.Logger    // optional; defaults to slog.Default()
 
 	// UpstreamTLS, if non-nil, is used when dialling upstream. Default is
 	// a tls.Config that uses the system root store.
@@ -117,7 +117,6 @@ func (s *Server) handleConn(ctx context.Context, raw net.Conn) {
 		s.log.Warn("intercept failed", "request_id", requestID, "host", host, "err", err.Error())
 	}
 }
-
 
 func writeJSONError(w io.Writer, status int, msg string, kvs ...string) {
 	body := map[string]any{"error": msg}

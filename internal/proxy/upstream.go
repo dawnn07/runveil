@@ -2,7 +2,9 @@ package proxy
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -11,6 +13,19 @@ import (
 
 	"railcore/internal/pipeline"
 )
+
+// writeJSONResp writes a JSON error response via an http.ResponseWriter.
+// Used by the handler that runs inside http.Server / http2.Server, where
+// we cannot write to the raw net.Conn directly.
+func writeJSONResp(w http.ResponseWriter, status int, msg string, kvs ...string) {
+	body := map[string]any{"error": msg}
+	for i := 0; i+1 < len(kvs); i += 2 {
+		body[kvs[i]] = kvs[i+1]
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(body)
+}
 
 // newHandler returns the http.Handler that runs the pipeline and forwards
 // allowed requests upstream. Used by both H1 and H2 servers.
@@ -24,18 +39,39 @@ func (s *Server) newHandler(host, requestID string) http.Handler {
 	client := &http.Client{Transport: transport, Timeout: 0}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		w = rec // shadow so all subsequent writes go through the recorder
+		start := time.Now()
+		decision := pipeline.Continue
+		var bytesIn int64
+
+		defer func() {
+			s.log.Info("request complete",
+				"request_id", requestID,
+				"host", host,
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", rec.status,
+				"bytes_in", bytesIn,
+				"bytes_out", rec.bytesOut,
+				"duration_ms", time.Since(start).Milliseconds(),
+				"decision", decision.String(),
+			)
+		}()
+
 		// Enforce body cap. MaxBytesReader returns an error on Read once the
 		// limit is exceeded.
 		r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			if isMaxBytesErr(err) {
-				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				writeJSONResp(w, http.StatusRequestEntityTooLarge, "request body too large", "max_bytes", fmt.Sprint(s.cfg.MaxBodyBytes))
 				return
 			}
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			writeJSONResp(w, http.StatusBadRequest, "read body failed", "detail", err.Error())
 			return
 		}
+		bytesIn = int64(len(body))
 
 		// Build the RequestCtx with a body-replacement so stages that read
 		// rc.Req.Body still see the bytes.
@@ -49,21 +85,22 @@ func (s *Server) newHandler(host, requestID string) http.Handler {
 			StartedAt: time.Now(),
 		}
 		dec, _ := s.cfg.Pipeline.Run(r.Context(), rc)
+		decision = dec
 		if dec == pipeline.Block {
-			http.Error(w, "blocked by railcore policy", http.StatusForbidden)
+			writeJSONResp(w, http.StatusForbidden, "blocked by railcore policy", "request_id", requestID)
 			return
 		}
 
 		target, err := s.resolveUpstream(host)
 		if err != nil {
-			http.Error(w, "resolve upstream: "+err.Error(), http.StatusBadGateway)
+			writeJSONResp(w, http.StatusBadGateway, "resolve upstream failed", "host", host, "detail", err.Error())
 			return
 		}
 
 		out, err := http.NewRequestWithContext(r.Context(), r.Method,
 			"https://"+target+r.URL.RequestURI(), io.NopCloser(newByteReader(body)))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadGateway)
+			writeJSONResp(w, http.StatusBadGateway, "build upstream request failed", "detail", err.Error())
 			return
 		}
 		out.Header = r.Header.Clone()
@@ -83,7 +120,7 @@ func (s *Server) newHandler(host, requestID string) http.Handler {
 
 		resp, err := client.Do(out)
 		if err != nil {
-			http.Error(w, "upstream unreachable: "+err.Error(), http.StatusBadGateway)
+			writeJSONResp(w, http.StatusBadGateway, "upstream unreachable", "host", host, "detail", err.Error())
 			return
 		}
 		defer resp.Body.Close()
@@ -157,6 +194,39 @@ func (r *byteReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
+// statusRecorder wraps http.ResponseWriter to capture status code and bytes
+// written for the completion log. It also passes through Flusher.
+type statusRecorder struct {
+	http.ResponseWriter
+	status      int
+	bytesOut    int64
+	wroteHeader bool
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	if r.wroteHeader {
+		return
+	}
+	r.status = code
+	r.wroteHeader = true
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func (r *statusRecorder) Write(p []byte) (int, error) {
+	if !r.wroteHeader {
+		r.WriteHeader(http.StatusOK)
+	}
+	n, err := r.ResponseWriter.Write(p)
+	r.bytesOut += int64(n)
+	return n, err
+}
+
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // errListenerClosed is returned by singleConnListener.Accept after its one
 // connection has been served. http.Server treats this as a clean shutdown.
 var errListenerClosed = errors.New("railcore: single-shot listener closed")
@@ -187,4 +257,3 @@ func (l *singleConnListener) Accept() (net.Conn, error) {
 func (l *singleConnListener) Close() error { return nil }
 
 func (l *singleConnListener) Addr() net.Addr { return l.conn.LocalAddr() }
-
