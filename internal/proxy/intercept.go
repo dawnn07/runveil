@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"sync"
-	"time"
 
 	"golang.org/x/net/http2"
 )
@@ -31,9 +30,7 @@ func (s *Server) handleIntercepted(ctx context.Context, raw net.Conn, host, requ
 	}
 	defer tlsConn.Close()
 
-	_ = tlsConn.SetDeadline(time.Now().Add(60 * time.Second))
-
-	handler := s.newHandler(ctx, host, requestID)
+	handler := s.newHandler(host, requestID)
 
 	if tlsConn.ConnectionState().NegotiatedProtocol == "h2" {
 		h2srv := &http2.Server{}

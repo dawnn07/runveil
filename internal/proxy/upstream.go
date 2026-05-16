@@ -1,7 +1,6 @@
 package proxy
 
 import (
-	"context"
 	"crypto/tls"
 	"errors"
 	"io"
@@ -15,7 +14,7 @@ import (
 
 // newHandler returns the http.Handler that runs the pipeline and forwards
 // allowed requests upstream. Used by both H1 and H2 servers.
-func (s *Server) newHandler(parentCtx context.Context, host, requestID string) http.Handler {
+func (s *Server) newHandler(host, requestID string) http.Handler {
 	transport := &http.Transport{
 		TLSClientConfig:       s.upstreamTLSConfig(host),
 		ForceAttemptHTTP2:     true,
@@ -68,6 +67,16 @@ func (s *Server) newHandler(parentCtx context.Context, host, requestID string) h
 			return
 		}
 		out.Header = r.Header.Clone()
+		// Strip hop-by-hop headers per RFC 7230 §6.1. http.Transport drops
+		// some of these on the wire, but explicit removal also prevents
+		// Connection: close from leaking and defeating upstream keep-alive.
+		for _, h := range []string{
+			"Connection", "Keep-Alive", "Proxy-Connection",
+			"Proxy-Authenticate", "Proxy-Authorization",
+			"Te", "Trailer", "Transfer-Encoding", "Upgrade",
+		} {
+			out.Header.Del(h)
+		}
 		// http.Client manages Host header from the URL; preserve original
 		// for SNI-sensitive upstreams via the TLS config's ServerName.
 		out.ContentLength = int64(len(body))
