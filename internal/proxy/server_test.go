@@ -12,9 +12,12 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"go.uber.org/goleak"
 
 	"railcore/internal/ca"
 	"railcore/internal/pipeline"
@@ -258,5 +261,71 @@ func TestProxy_SSEStreamsIncrementally(t *testing.T) {
 		}
 		// Skip the blank separator line.
 		_, _ = reader.ReadString('\n')
+	}
+}
+
+func TestProxy_ConcurrentRequestsNoLeaks(t *testing.T) {
+	// IgnoreCurrent snapshots goroutines that already exist from prior tests
+	// (e.g. keep-alive connections from TestProxy_InterceptsAndForwardsGET)
+	// so we only detect leaks introduced by this test.
+	defer goleak.VerifyNone(t,
+		goleak.IgnoreCurrent(),
+		// Silence known background goroutines from httptest's TLS server.
+		goleak.IgnoreTopFunction("net/http.(*persistConn).readLoop"),
+		goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),
+		goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
+	)
+
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	t.Cleanup(upstream.Close)
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+	upstreamPool := x509.NewCertPool()
+	upstreamPool.AddCert(upstream.Certificate())
+
+	srv, addr := newTestServer(t)
+	srv.cfg.UpstreamTLS = &tls.Config{RootCAs: upstreamPool, ServerName: upstreamURL.Hostname()}
+	srv.cfg.UpstreamResolver = func(_ string) (string, error) { return upstreamURL.Host, nil }
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(srv.cfg.CA.RootCert())
+	proxyURL, _ := url.Parse("http://" + addr)
+
+	const n = 100
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			tr := &http.Transport{
+				Proxy: http.ProxyURL(proxyURL),
+				TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "concurrent.test"},
+			}
+			client := &http.Client{
+				Transport: tr,
+				Timeout:   10 * time.Second,
+			}
+			resp, err := client.Get("https://concurrent.test/")
+			if err != nil {
+				errs <- err
+				return
+			}
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			// Close the transport so the server-side connection is fully released
+			// before goleak checks for leaked goroutines.
+			tr.CloseIdleConnections()
+			if string(body) != "ok" {
+				errs <- fmt.Errorf("body = %q", string(body))
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Errorf("request failed: %v", err)
 	}
 }
