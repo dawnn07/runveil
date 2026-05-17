@@ -176,3 +176,77 @@ func TestParseAnthropic_MalformedJSON(t *testing.T) {
 		t.Fatalf("expected error for malformed JSON, got parsed=%+v", parsed)
 	}
 }
+
+func TestParseAnthropic_SystemAsArray(t *testing.T) {
+	// Newer Anthropic API form: system is an array of content blocks.
+	body := []byte(`{
+		"model": "claude-opus-4-7",
+		"system": [
+			{"type": "text", "text": "you are a code reviewer"},
+			{"type": "text", "text": "be terse"}
+		],
+		"messages": [
+			{"role": "user", "content": "hello"}
+		]
+	}`)
+	req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
+	parsed, err := ParseRequest("api.anthropic.com", req, body)
+	if err != nil {
+		t.Fatalf("ParseRequest: %v", err)
+	}
+	if parsed == nil {
+		t.Fatal("parsed is nil")
+	}
+	if len(parsed.Texts) != 3 {
+		t.Fatalf("Texts len = %d, want 3; got %+v", len(parsed.Texts), parsed.Texts)
+	}
+	if parsed.Texts[0].Role != "system" || parsed.Texts[0].Content != "you are a code reviewer" {
+		t.Errorf("first system seg = %+v", parsed.Texts[0])
+	}
+	if parsed.Texts[1].Role != "system" || parsed.Texts[1].Content != "be terse" {
+		t.Errorf("second system seg = %+v", parsed.Texts[1])
+	}
+	if parsed.Texts[2].Role != "user" || parsed.Texts[2].Content != "hello" {
+		t.Errorf("user seg = %+v", parsed.Texts[2])
+	}
+}
+
+func TestParseAnthropic_ToolResultStringContent(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-opus-4-7",
+		"messages": [
+			{"role": "user", "content": [
+				{"type": "tool_result", "tool_use_id": "abc", "content": "AKIAIOSFODNN7EXAMPLE"}
+			]}
+		]
+	}`)
+	req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
+	parsed, err := ParseRequest("api.anthropic.com", req, body)
+	if err != nil {
+		t.Fatalf("ParseRequest: %v", err)
+	}
+	if len(parsed.Texts) != 1 || parsed.Texts[0].Content != "AKIAIOSFODNN7EXAMPLE" {
+		t.Fatalf("tool_result string content not flattened: %+v", parsed.Texts)
+	}
+}
+
+func TestParseAnthropic_ToolResultArrayContent(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-opus-4-7",
+		"messages": [
+			{"role": "user", "content": [
+				{"type": "tool_result", "tool_use_id": "abc", "content": [
+					{"type": "text", "text": "nested secret"}
+				]}
+			]}
+		]
+	}`)
+	req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
+	parsed, err := ParseRequest("api.anthropic.com", req, body)
+	if err != nil {
+		t.Fatalf("ParseRequest: %v", err)
+	}
+	if len(parsed.Texts) != 1 || parsed.Texts[0].Content != "nested secret" {
+		t.Fatalf("tool_result array content not flattened: %+v", parsed.Texts)
+	}
+}
