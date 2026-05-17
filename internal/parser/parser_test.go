@@ -99,3 +99,80 @@ func TestParseOpenAI_MalformedJSON(t *testing.T) {
 		t.Fatalf("expected error for malformed JSON, got parsed=%+v", parsed)
 	}
 }
+
+func TestParseAnthropic_StringContent(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-opus-4-7",
+		"system": "you are a code reviewer",
+		"messages": [
+			{"role": "user", "content": "review this"}
+		]
+	}`)
+	req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
+	parsed, err := ParseRequest("api.anthropic.com", req, body)
+	if err != nil {
+		t.Fatalf("ParseRequest: %v", err)
+	}
+	if parsed == nil {
+		t.Fatal("parsed is nil")
+	}
+	if parsed.Vendor != "anthropic" || parsed.Endpoint != "messages" {
+		t.Fatalf("vendor/endpoint = %q/%q", parsed.Vendor, parsed.Endpoint)
+	}
+	if len(parsed.Texts) != 2 {
+		t.Fatalf("Texts len = %d, want 2", len(parsed.Texts))
+	}
+	if parsed.Texts[0].Role != "system" || parsed.Texts[0].Content != "you are a code reviewer" || parsed.Texts[0].Index != -1 {
+		t.Errorf("system seg = %+v", parsed.Texts[0])
+	}
+	if parsed.Texts[1].Role != "user" || parsed.Texts[1].Content != "review this" || parsed.Texts[1].Index != 0 {
+		t.Errorf("user seg = %+v", parsed.Texts[1])
+	}
+}
+
+func TestParseAnthropic_ContentBlocksArray(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-opus-4-7",
+		"messages": [
+			{"role": "user", "content": [
+				{"type": "text", "text": "first chunk"},
+				{"type": "text", "text": "second chunk"}
+			]}
+		]
+	}`)
+	req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
+	parsed, err := ParseRequest("api.anthropic.com", req, body)
+	if err != nil {
+		t.Fatalf("ParseRequest: %v", err)
+	}
+	if parsed == nil {
+		t.Fatal("parsed is nil")
+	}
+	if len(parsed.Texts) != 2 {
+		t.Fatalf("Texts len = %d, want 2", len(parsed.Texts))
+	}
+	if parsed.Texts[0].Content != "first chunk" || parsed.Texts[1].Content != "second chunk" {
+		t.Errorf("flattened content = %+v", parsed.Texts)
+	}
+	if parsed.Texts[0].Role != "user" || parsed.Texts[1].Role != "user" {
+		t.Errorf("expected both segments to inherit role=user; got %+v", parsed.Texts)
+	}
+}
+
+func TestParseAnthropic_NoSystemNoMessages(t *testing.T) {
+	body := []byte(`{"model": "claude-opus-4-7"}`)
+	req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
+	parsed, err := ParseRequest("api.anthropic.com", req, body)
+	if err == nil {
+		t.Fatalf("expected error for missing messages, got parsed=%+v", parsed)
+	}
+}
+
+func TestParseAnthropic_MalformedJSON(t *testing.T) {
+	body := []byte(`{not json`)
+	req := httptest.NewRequest("POST", "https://api.anthropic.com/v1/messages", nil)
+	parsed, err := ParseRequest("api.anthropic.com", req, body)
+	if err == nil {
+		t.Fatalf("expected error for malformed JSON, got parsed=%+v", parsed)
+	}
+}
