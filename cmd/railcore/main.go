@@ -21,6 +21,7 @@ import (
 	"railcore/internal/pipeline"
 	"railcore/internal/policy"
 	"railcore/internal/proxy"
+	"railcore/internal/stage/pathscan"
 	"railcore/internal/stage/secretscan"
 	"railcore/internal/trust"
 )
@@ -64,6 +65,7 @@ func main() {
 	}
 
 	chain := pipeline.NewChain().WithLogger(logger)
+	chain.Register(pathscan.New(pathscan.Config{Policy: loadedPolicy}, logger))
 	chain.Register(secretscan.New(secretscan.Config{
 		BlockOnDetect: effectiveBlock,
 		Policy:        loadedPolicy,
