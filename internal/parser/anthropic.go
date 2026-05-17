@@ -123,3 +123,60 @@ func flattenAnthropicContent(raw json.RawMessage) []string {
 	}
 	return out
 }
+
+// ToolUse is one structured tool_use block from an Anthropic messages
+// request. Returned by ExtractToolUses for callers that need typed
+// access to tool names alongside raw input JSON.
+type ToolUse struct {
+	Tool         string          // tool name (e.g., "Read", "Write")
+	Input        json.RawMessage // raw input JSON; caller decodes per tool schema
+	MessageIndex int             // position of the originating message in messages[]
+}
+
+// ExtractToolUses parses an Anthropic messages body and returns every
+// tool_use content block. Returns nil for non-Anthropic hosts or for
+// bodies that fail to parse. Silently skips malformed individual blocks.
+func ExtractToolUses(host string, body []byte) []ToolUse {
+	if host != "api.anthropic.com" {
+		return nil
+	}
+	var req anthropicMessagesRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil
+	}
+
+	var out []ToolUse
+	for i, m := range req.Messages {
+		var blocks []map[string]json.RawMessage
+		if err := json.Unmarshal(m.Content, &blocks); err != nil {
+			continue
+		}
+		for _, b := range blocks {
+			typeRaw, ok := b["type"]
+			if !ok {
+				continue
+			}
+			var blockType string
+			if err := json.Unmarshal(typeRaw, &blockType); err != nil {
+				continue
+			}
+			if blockType != "tool_use" {
+				continue
+			}
+			var name string
+			if nameRaw, ok := b["name"]; ok {
+				_ = json.Unmarshal(nameRaw, &name)
+			}
+			if name == "" {
+				continue
+			}
+			inputRaw := b["input"]
+			out = append(out, ToolUse{
+				Tool:         name,
+				Input:        inputRaw,
+				MessageIndex: i,
+			})
+		}
+	}
+	return out
+}

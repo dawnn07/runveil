@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -248,5 +249,93 @@ func TestParseAnthropic_ToolResultArrayContent(t *testing.T) {
 	}
 	if len(parsed.Texts) != 1 || parsed.Texts[0].Content != "nested secret" {
 		t.Fatalf("tool_result array content not flattened: %+v", parsed.Texts)
+	}
+}
+
+func TestExtractToolUses_AnthropicSingleRead(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-opus-4-7",
+		"messages": [
+			{"role": "assistant", "content": [
+				{"type": "text", "text": "Let me check"},
+				{"type": "tool_use", "id": "toolu_01",
+				 "name": "Read",
+				 "input": {"file_path": "/src/foo.go"}}
+			]}
+		]
+	}`)
+	got := ExtractToolUses("api.anthropic.com", body)
+	if len(got) != 1 {
+		t.Fatalf("got %d tool_uses, want 1; got %+v", len(got), got)
+	}
+	tu := got[0]
+	if tu.Tool != "Read" {
+		t.Errorf("Tool = %q, want Read", tu.Tool)
+	}
+	if tu.MessageIndex != 0 {
+		t.Errorf("MessageIndex = %d, want 0", tu.MessageIndex)
+	}
+	var inp struct {
+		FilePath string `json:"file_path"`
+	}
+	if err := json.Unmarshal(tu.Input, &inp); err != nil {
+		t.Fatalf("unmarshal input: %v", err)
+	}
+	if inp.FilePath != "/src/foo.go" {
+		t.Errorf("file_path = %q, want /src/foo.go", inp.FilePath)
+	}
+}
+
+func TestExtractToolUses_NoToolUses(t *testing.T) {
+	body := []byte(`{
+		"model": "claude-opus-4-7",
+		"messages": [
+			{"role": "user", "content": "hello"}
+		]
+	}`)
+	got := ExtractToolUses("api.anthropic.com", body)
+	if len(got) != 0 {
+		t.Errorf("expected 0 tool_uses, got %d", len(got))
+	}
+}
+
+func TestExtractToolUses_NonAnthropicHost(t *testing.T) {
+	body := []byte(`{"messages": [{"role": "user", "content": "x"}]}`)
+	got := ExtractToolUses("api.openai.com", body)
+	if got != nil {
+		t.Errorf("expected nil for non-Anthropic host, got %+v", got)
+	}
+}
+
+func TestExtractToolUses_MalformedJSON(t *testing.T) {
+	got := ExtractToolUses("api.anthropic.com", []byte(`{not json`))
+	if got != nil {
+		t.Errorf("expected nil for malformed JSON, got %+v", got)
+	}
+}
+
+func TestExtractToolUses_MultipleBlocksAcrossMessages(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role": "assistant", "content": [
+				{"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "/a"}}
+			]},
+			{"role": "user", "content": [
+				{"type": "tool_result", "tool_use_id": "t1", "content": "..."}
+			]},
+			{"role": "assistant", "content": [
+				{"type": "tool_use", "id": "t2", "name": "Write", "input": {"file_path": "/b"}}
+			]}
+		]
+	}`)
+	got := ExtractToolUses("api.anthropic.com", body)
+	if len(got) != 2 {
+		t.Fatalf("got %d, want 2; %+v", len(got), got)
+	}
+	if got[0].Tool != "Read" || got[0].MessageIndex != 0 {
+		t.Errorf("[0] = %+v", got[0])
+	}
+	if got[1].Tool != "Write" || got[1].MessageIndex != 2 {
+		t.Errorf("[1] = %+v", got[1])
 	}
 }
