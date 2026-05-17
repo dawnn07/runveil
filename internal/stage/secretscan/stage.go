@@ -76,49 +76,15 @@ func (s *Stage) Process(ctx context.Context, rc *pipeline.RequestCtx) (pipeline.
 		return pipeline.Continue, nil
 	}
 
-	// DIAGNOSTIC: dump first 200 bytes of body for AI hosts so we can
-	// see what Claude Code etc. are actually sending. REMOVE BEFORE MERGE.
-	if rc.Host == "api.anthropic.com" || rc.Host == "api.openai.com" {
-		preview := body
-		if len(preview) > 200 {
-			preview = preview[:200]
-		}
-		s.log.Info("DIAG body preview",
-			"host", rc.Host,
-			"path", rc.Req.URL.Path,
-			"content_encoding", rc.Req.Header.Get("Content-Encoding"),
-			"body_len", len(body),
-			"body_first_200_bytes", string(preview))
-	}
-
 	parsed, err := parser.ParseRequest(rc.Host, rc.Req, body)
 	if err != nil {
-		s.log.Info("DIAG parser error",
+		s.log.Debug("secretscan parser error",
 			"host", rc.Host,
 			"err", err.Error())
 		return pipeline.Continue, nil
 	}
 	if parsed == nil {
-		s.log.Info("DIAG parser returned nil (unknown endpoint)",
-			"host", rc.Host,
-			"method", rc.Req.Method,
-			"path", rc.Req.URL.Path)
 		return pipeline.Continue, nil
-	}
-
-	// DIAGNOSTIC: dump segments extracted from the parsed request.
-	// REMOVE BEFORE MERGE.
-	for i, seg := range parsed.Texts {
-		contentPreview := seg.Content
-		if len(contentPreview) > 300 {
-			contentPreview = contentPreview[:300]
-		}
-		s.log.Info("DIAG parsed segment",
-			"seg_i", i,
-			"role", seg.Role,
-			"index", seg.Index,
-			"content_len", len(seg.Content),
-			"content_preview", contentPreview)
 	}
 
 	var enriched []EnrichedFinding
