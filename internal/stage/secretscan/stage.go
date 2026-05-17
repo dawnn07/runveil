@@ -15,6 +15,7 @@ import (
 	"railcore/internal/detector"
 	"railcore/internal/parser"
 	"railcore/internal/pipeline"
+	"railcore/internal/policy"
 )
 
 // Config controls the stage's runtime behaviour.
@@ -22,7 +23,8 @@ type Config struct {
 	// BlockOnDetect: when true, any High-severity finding produces Block.
 	// Medium/Low never block. When false (default), all findings are
 	// logged but the request still proceeds upstream.
-	BlockOnDetect bool
+	BlockOnDetect bool           // used when Policy is nil
+	Policy        *policy.Policy // when non-nil, drives all decisions
 }
 
 // EnrichedFinding pairs a detector.Finding with the segment metadata
@@ -35,20 +37,24 @@ type EnrichedFinding struct {
 	Finding      detector.Finding
 	Role         string
 	MessageIndex int
+	Rule         string // name of the rule that decided this finding; "" if no policy in use
 }
 
 // MarshalJSON emits the public shape used in 403 responses and audit logs.
 func (e EnrichedFinding) MarshalJSON() ([]byte, error) {
-	return json.Marshal(struct {
+	type flat struct {
 		Pattern      string `json:"pattern"`
 		Severity     string `json:"severity"`
 		Role         string `json:"role"`
 		MessageIndex int    `json:"message_index"`
-	}{
+		Rule         string `json:"rule,omitempty"`
+	}
+	return json.Marshal(flat{
 		Pattern:      e.Finding.Pattern,
 		Severity:     e.Finding.Severity.String(),
 		Role:         e.Role,
 		MessageIndex: e.MessageIndex,
+		Rule:         e.Rule,
 	})
 }
 

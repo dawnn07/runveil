@@ -2,6 +2,7 @@ package secretscan
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"railcore/internal/detector"
 	"railcore/internal/pipeline"
 )
 
@@ -123,5 +125,36 @@ func TestSecretscan_MalformedJSONContinues(t *testing.T) {
 	}
 	if dec != pipeline.Continue {
 		t.Fatalf("decision = %v, want Continue (fail-open on parser errors)", dec)
+	}
+}
+
+func TestEnrichedFinding_MarshalJSON_RuleIncludedWhenSet(t *testing.T) {
+	ef := EnrichedFinding{
+		Finding:      detector.Finding{Pattern: "aws_access_key_id", Severity: detector.SeverityHigh},
+		Role:         "user",
+		MessageIndex: 0,
+		Rule:         "block-aws",
+	}
+	data, err := json.Marshal(ef)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"rule":"block-aws"`) {
+		t.Errorf("expected rule field in output; got %s", string(data))
+	}
+}
+
+func TestEnrichedFinding_MarshalJSON_RuleOmittedWhenEmpty(t *testing.T) {
+	ef := EnrichedFinding{
+		Finding:      detector.Finding{Pattern: "aws_access_key_id", Severity: detector.SeverityHigh},
+		Role:         "user",
+		MessageIndex: 0,
+	}
+	data, err := json.Marshal(ef)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if strings.Contains(string(data), `"rule"`) {
+		t.Errorf("rule field should be omitted when empty; got %s", string(data))
 	}
 }
