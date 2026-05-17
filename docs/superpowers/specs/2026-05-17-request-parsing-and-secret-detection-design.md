@@ -468,3 +468,24 @@ Sub-project #2 is complete when:
 4. The design doc and implementation are committed to the repo.
 
 When these four hold, sub-project #3 (policy engine) can begin building on the `AddPattern` hook and the `pipeline.Stage` framework that this sub-project extends.
+
+---
+
+## 11. Acceptance Result
+
+**Date:** 2026-05-17
+**Tool exercised:** Claude Code (Node.js CLI) via `HTTPS_PROXY` + `NODE_EXTRA_CA_CERTS`.
+
+**Block mode (`--block-on-detect`):** Pass.
+
+- Synthetic AWS key in prompt → 403 returned to Claude Code.
+- Proxy log: `WARN secretscan blocked patterns=[aws_access_key_id,aws_secret_access_key] decision=block status=403`.
+- 403 JSON body contained the findings array with pattern/severity/role/message_index; matched bytes did not appear anywhere in any Railcore-generated output.
+
+**Warn mode (default):** Verified via curl smoke test; deferred end-to-end Claude Code re-run.
+
+**Bug surfaced during acceptance (now fixed):**
+
+The Anthropic parser only handled the legacy `system: "..."` string form. Claude Code (and current Anthropic SDKs) send `system` as an array of content blocks: `[{"type":"text","text":"..."}]`. The parser errored on this shape and the stage fail-opened, bypassing detection entirely. Fixed by accepting either form via `json.RawMessage` and recursively flattening content blocks (including `tool_result` and `tool_use`). Three new tests cover the regression.
+
+**Status:** Pass. Sub-project #2 done definition §10 satisfied. The "oh shit" wedge demo from [`part1.md`](../../../part1.md) §1.3 is real and works end-to-end against a production AI coding tool.
