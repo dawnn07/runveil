@@ -545,3 +545,72 @@ func TestProxy_BlockBodyIncludesRule(t *testing.T) {
 		t.Errorf("rule = %v, want block-aws; body=%s", parsed.Findings[0]["rule"], string(body))
 	}
 }
+
+// pathBlockStage simulates the pathscan stage: stashes a PathFinding-shaped
+// map and returns Block. Lets us test the proxy's aggregation without an
+// import cycle to the real pathscan package.
+type pathBlockStage struct{}
+
+func (pathBlockStage) Name() string { return "test-path-block" }
+func (pathBlockStage) Process(_ context.Context, rc *pipeline.RequestCtx) (pipeline.Decision, error) {
+	rc.Metadata["pathscan.findings"] = []map[string]any{
+		{
+			"detector":      "path-scan",
+			"tool":          "Read",
+			"path":          "/src/payments/charge.go",
+			"message_index": 0,
+			"rule":          "block-payments",
+		},
+	}
+	return pipeline.Block, nil
+}
+
+func TestProxy_BlockBodyIncludesPathFindings(t *testing.T) {
+	srv, addr := newTestServer(t)
+	srv.cfg.Pipeline.Register(pathBlockStage{})
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(srv.cfg.CA.RootCert())
+	proxyURL, _ := url.Parse("http://" + addr)
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "block.test"},
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get("https://block.test/")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var parsed struct {
+		Error    string                   `json:"error"`
+		Findings []map[string]interface{} `json:"findings"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("body not JSON: %v, body=%s", err, string(body))
+	}
+	if len(parsed.Findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(parsed.Findings))
+	}
+	f := parsed.Findings[0]
+	if f["detector"] != "path-scan" {
+		t.Errorf("detector = %v, want path-scan", f["detector"])
+	}
+	if f["tool"] != "Read" {
+		t.Errorf("tool = %v, want Read", f["tool"])
+	}
+	if f["path"] != "/src/payments/charge.go" {
+		t.Errorf("path = %v, want /src/payments/charge.go", f["path"])
+	}
+	if f["rule"] != "block-payments" {
+		t.Errorf("rule = %v, want block-payments", f["rule"])
+	}
+}

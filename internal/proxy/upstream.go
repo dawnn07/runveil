@@ -87,8 +87,7 @@ func (s *Server) newHandler(host, requestID string) http.Handler {
 		dec, _ := s.cfg.Pipeline.Run(r.Context(), rc)
 		decision = dec
 		if dec == pipeline.Block {
-			findings := rc.Metadata["secretscan.findings"]
-			writeBlockResp(w, requestID, findings)
+			writeBlockResp(w, requestID, rc)
 			return
 		}
 
@@ -178,24 +177,57 @@ func isMaxBytesErr(err error) bool {
 }
 
 // writeBlockResp writes a 403 with a JSON body listing the findings (if
-// any). The findings value comes from rc.Metadata["secretscan.findings"]
-// and may be []secretscan.EnrichedFinding (production) or a slice of
-// maps with the same public keys (tests). Both shapes serialize to the
-// same JSON because EnrichedFinding implements MarshalJSON.
+// any) from both pathscan and secretscan stages. The detector field is
+// per-finding (each finding's MarshalJSON emits its own detector value).
 //
-// Matched bytes are deliberately never echoed in this body.
-func writeBlockResp(w http.ResponseWriter, requestID string, findings any) {
+// Matched secret bytes are deliberately never echoed; path values ARE
+// echoed because the path is the actionable signal for operators.
+func writeBlockResp(w http.ResponseWriter, requestID string, rc *pipeline.RequestCtx) {
 	body := map[string]any{
 		"error":      "blocked by railcore policy",
 		"request_id": requestID,
-		"detector":   "secret-scan",
 	}
-	if findings != nil {
-		body["findings"] = findings
+
+	var all []any
+	if v, ok := rc.Metadata["pathscan.findings"]; ok {
+		all = append(all, v)
 	}
+	if v, ok := rc.Metadata["secretscan.findings"]; ok {
+		all = append(all, v)
+	}
+	if len(all) > 0 {
+		body["findings"] = flattenFindings(all)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusForbidden)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+// flattenFindings handles the case where rc.Metadata holds typed slices
+// (e.g., []secretscan.EnrichedFinding or []pathscan.PathFinding) that
+// must be unwrapped, vs. raw []map[string]any from tests. We marshal
+// each input to JSON, then unmarshal as a []any, producing a uniformly
+// shaped flat slice.
+func flattenFindings(in []any) []any {
+	var out []any
+	for _, v := range in {
+		raw, err := json.Marshal(v)
+		if err != nil {
+			continue
+		}
+		var single any
+		if err := json.Unmarshal(raw, &single); err != nil {
+			continue
+		}
+		switch s := single.(type) {
+		case []any:
+			out = append(out, s...)
+		default:
+			out = append(out, single)
+		}
+	}
+	return out
 }
 
 // byteReader is an io.Reader over a fixed []byte. Used to re-create a

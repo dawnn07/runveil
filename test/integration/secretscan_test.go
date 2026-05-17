@@ -105,17 +105,16 @@ func TestSecretscan_E2E_BlockOnAWSKey(t *testing.T) {
 	respBody, _ := io.ReadAll(resp.Body)
 	var parsed struct {
 		Error    string                   `json:"error"`
-		Detector string                   `json:"detector"`
 		Findings []map[string]interface{} `json:"findings"`
 	}
 	if err := json.Unmarshal(respBody, &parsed); err != nil {
 		t.Fatalf("response not JSON: %v, body=%s", err, string(respBody))
 	}
-	if parsed.Detector != "secret-scan" {
-		t.Errorf("detector = %q, want secret-scan", parsed.Detector)
-	}
 	if len(parsed.Findings) < 1 {
 		t.Fatalf("expected >=1 finding, got %d; body=%s", len(parsed.Findings), string(respBody))
+	}
+	if len(parsed.Findings) > 0 && parsed.Findings[0]["detector"] != "secret-scan" {
+		t.Errorf("finding detector = %v, want secret-scan", parsed.Findings[0]["detector"])
 	}
 	if strings.Contains(string(respBody), "AKIA") {
 		t.Errorf("response body contains matched secret bytes: %s", string(respBody))
