@@ -490,3 +490,58 @@ func TestProxy_BlockBodyIncludesFindings(t *testing.T) {
 		t.Errorf("403 body contains matched bytes: %s", string(body))
 	}
 }
+
+type policyBlockStage struct{}
+
+func (policyBlockStage) Name() string { return "test-policy-block" }
+func (policyBlockStage) Process(_ context.Context, rc *pipeline.RequestCtx) (pipeline.Decision, error) {
+	rc.Metadata["secretscan.findings"] = []map[string]any{
+		{
+			"pattern":       "aws_access_key_id",
+			"severity":      "high",
+			"role":          "user",
+			"message_index": 0,
+			"rule":          "block-aws",
+		},
+	}
+	return pipeline.Block, nil
+}
+
+func TestProxy_BlockBodyIncludesRule(t *testing.T) {
+	srv, addr := newTestServer(t)
+	srv.cfg.Pipeline.Register(policyBlockStage{})
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(srv.cfg.CA.RootCert())
+	proxyURL, _ := url.Parse("http://" + addr)
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "block.test"},
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get("https://block.test/")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var parsed struct {
+		Findings []map[string]interface{} `json:"findings"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("body not JSON: %v, body=%s", err, string(body))
+	}
+	if len(parsed.Findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(parsed.Findings))
+	}
+	if parsed.Findings[0]["rule"] != "block-aws" {
+		t.Errorf("rule = %v, want block-aws; body=%s", parsed.Findings[0]["rule"], string(body))
+	}
+}
