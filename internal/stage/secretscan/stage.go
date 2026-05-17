@@ -43,6 +43,7 @@ type EnrichedFinding struct {
 // MarshalJSON emits the public shape used in 403 responses and audit logs.
 func (e EnrichedFinding) MarshalJSON() ([]byte, error) {
 	type flat struct {
+		Detector     string `json:"detector"`
 		Pattern      string `json:"pattern"`
 		Severity     string `json:"severity"`
 		Role         string `json:"role"`
@@ -50,6 +51,7 @@ func (e EnrichedFinding) MarshalJSON() ([]byte, error) {
 		Rule         string `json:"rule,omitempty"`
 	}
 	return json.Marshal(flat{
+		Detector:     "secret-scan",
 		Pattern:      e.Finding.Pattern,
 		Severity:     e.Finding.Severity.String(),
 		Role:         e.Role,
