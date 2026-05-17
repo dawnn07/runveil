@@ -1,6 +1,11 @@
-// Package main is the Railcore proxy entrypoint. In this sub-project the
-// binary supports a single command: `railcore proxy [--port N]`. Full CLI
-// (init, start, stop, status, logs, test-policy) is sub-project #5.
+// Package main is the Railcore proxy entrypoint.
+//
+// Sub-project #1: this binary supports `railcore proxy [--port N]
+// [--data-dir PATH]`.
+//
+// Sub-project #2: this binary additionally supports `--block-on-detect`
+// (or the RAILCORE_BLOCK_ON_DETECT=1 env var). When set, the secret-scan
+// stage returns Block on any High-severity finding.
 package main
 
 import (
@@ -17,18 +22,20 @@ import (
 	"railcore/internal/ca"
 	"railcore/internal/pipeline"
 	"railcore/internal/proxy"
+	"railcore/internal/stage/secretscan"
 	"railcore/internal/trust"
 )
 
 func main() {
 	if len(os.Args) < 2 || os.Args[1] != "proxy" {
-		fmt.Fprintln(os.Stderr, "usage: railcore proxy [--port N] [--data-dir PATH]")
+		fmt.Fprintln(os.Stderr, "usage: railcore proxy [--port N] [--data-dir PATH] [--block-on-detect]")
 		os.Exit(2)
 	}
 
 	fs := flag.NewFlagSet("proxy", flag.ExitOnError)
 	port := fs.Int("port", defaultPort(), "TCP port to listen on (overrides RAILCORE_PORT)")
 	dataDir := fs.String("data-dir", defaultDataDir(), "directory for CA + state")
+	blockOnDetect := fs.Bool("block-on-detect", false, "return 403 on High-severity secret findings (default WARN only)")
 	_ = fs.Parse(os.Args[2:])
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -40,16 +47,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Best-effort trust install. If it fails, print manual instructions
-	// and continue — the user may have done it already by hand.
 	if err := trust.New().Install(caInst.RootPath()); err != nil {
 		logger.Warn("trust-store auto-install did not complete",
 			"err", err.Error(),
 			"manual_steps", trust.ManualInstructions(caInst.RootPath()))
 	}
 
+	// Effective BlockOnDetect: CLI flag wins, env var is fallback.
+	effectiveBlock := *blockOnDetect || os.Getenv("RAILCORE_BLOCK_ON_DETECT") == "1"
+
 	chain := pipeline.NewChain().WithLogger(logger)
-	chain.Register(forwardStage{})
+	chain.Register(secretscan.New(secretscan.Config{
+		BlockOnDetect: effectiveBlock,
+	}, logger))
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 	srv := proxy.New(proxy.Config{
@@ -65,7 +75,10 @@ func main() {
 		fmt.Fprintf(os.Stderr, "port %d in use; set RAILCORE_PORT or stop other process\n", *port)
 		os.Exit(1)
 	}
-	logger.Info("railcore proxy listening", "addr", addr, "ca_path", caInst.RootPath())
+	logger.Info("railcore proxy listening",
+		"addr", addr,
+		"ca_path", caInst.RootPath(),
+		"block_on_detect", effectiveBlock)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -96,13 +109,4 @@ func defaultDataDir() string {
 		return filepath.Join(home, ".railcore")
 	}
 	return ".railcore-data"
-}
-
-// forwardStage is the only registered stage in this sub-project. It is a
-// no-op that always allows the request to proceed to upstream.
-type forwardStage struct{}
-
-func (forwardStage) Name() string { return "forward" }
-func (forwardStage) Process(_ context.Context, _ *pipeline.RequestCtx) (pipeline.Decision, error) {
-	return pipeline.Continue, nil
 }
