@@ -56,7 +56,8 @@ type Rule struct {
 type Match struct {
 	Pattern  *globPattern       // nil = no pattern condition
 	Severity *detector.Severity // nil = no severity condition
-	All      bool
+	All      bool               // catch-all
+	Path     *doublestarPattern // file path glob
 }
 
 // Policy is a loaded, validated, compiled policy ready for Decide.
@@ -99,4 +100,36 @@ func matches(m *Match, f detector.Finding) bool {
 	// At least one condition must have been present (loader validates this).
 	// All present conditions matched.
 	return m.Pattern != nil || m.Severity != nil
+}
+
+// pathMatches reports whether m matches a path event.
+// A rule's Match must have either Path or All set to be eligible.
+// Rules with only Pattern or only Severity are skipped for path events.
+func pathMatches(m *Match, path string) bool {
+	if m.All {
+		return true
+	}
+	if m.Path != nil {
+		return m.Path.match(path)
+	}
+	return false
+}
+
+// DecidePath returns the action and matching rule for a file path.
+// Mirrors Decide for secret findings but matches against the Path
+// condition of rules. Rules with no Path field never match a PathEvent
+// (except the catch-all All:true rule, which matches everything).
+//
+// Returns (ActionWarn, nil) if p is nil/empty or no rule matches.
+// Safe for concurrent use after construction.
+func (p *Policy) DecidePath(path string) (Action, *Rule) {
+	if p == nil {
+		return ActionWarn, nil
+	}
+	for i := range p.Rules {
+		if pathMatches(&p.Rules[i].Match, path) {
+			return p.Rules[i].Action, &p.Rules[i]
+		}
+	}
+	return ActionWarn, nil
 }

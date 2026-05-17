@@ -632,3 +632,133 @@ func TestDoublestarPattern_NilSafe(t *testing.T) {
 		t.Error("nil doublestar should not match")
 	}
 }
+
+func mustDoublestar(t *testing.T, s string) *doublestarPattern {
+	t.Helper()
+	d, err := compileDoublestar(s)
+	if err != nil {
+		t.Fatalf("compileDoublestar(%q): %v", s, err)
+	}
+	return d
+}
+
+func TestDecidePath_BlockOnPaymentsGlob(t *testing.T) {
+	p := mustPolicy(t, Rule{
+		Name:   "block-payments",
+		Match:  Match{Path: mustDoublestar(t, "**/payments/**")},
+		Action: ActionBlock,
+	})
+	a, r := p.DecidePath("/src/payments/charge.go")
+	if a != ActionBlock {
+		t.Errorf("action = %v, want Block", a)
+	}
+	if r == nil || r.Name != "block-payments" {
+		t.Errorf("rule = %+v, want block-payments", r)
+	}
+}
+
+func TestDecidePath_NoMatchReturnsWarn(t *testing.T) {
+	p := mustPolicy(t, Rule{
+		Name:   "block-payments",
+		Match:  Match{Path: mustDoublestar(t, "**/payments/**")},
+		Action: ActionBlock,
+	})
+	a, r := p.DecidePath("/src/billing/foo.go")
+	if a != ActionWarn {
+		t.Errorf("action = %v, want Warn (no match)", a)
+	}
+	if r != nil {
+		t.Errorf("rule = %+v, want nil", r)
+	}
+}
+
+func TestDecidePath_NilPolicyReturnsWarn(t *testing.T) {
+	var p *Policy
+	a, r := p.DecidePath("/x")
+	if a != ActionWarn {
+		t.Errorf("nil policy: action = %v, want Warn", a)
+	}
+	if r != nil {
+		t.Errorf("nil policy: rule = %v, want nil", r)
+	}
+}
+
+func TestDecidePath_RuleWithoutPathSkipped(t *testing.T) {
+	p := mustPolicy(t,
+		Rule{
+			Name:   "block-aws-pattern",
+			Match:  Match{Pattern: mustGlob(t, "aws_*")},
+			Action: ActionBlock,
+		},
+		Rule{
+			Name:   "block-payments-path",
+			Match:  Match{Path: mustDoublestar(t, "**/payments/**")},
+			Action: ActionBlock,
+		},
+	)
+	a, r := p.DecidePath("/src/payments/charge.go")
+	if a != ActionBlock {
+		t.Errorf("action = %v, want Block", a)
+	}
+	if r == nil || r.Name != "block-payments-path" {
+		t.Errorf("rule = %+v, want block-payments-path", r)
+	}
+}
+
+func TestDecidePath_FirstMatchWins(t *testing.T) {
+	p := mustPolicy(t,
+		Rule{
+			Name:   "allow-payments-tests",
+			Match:  Match{Path: mustDoublestar(t, "**/payments/test/**")},
+			Action: ActionAllow,
+		},
+		Rule{
+			Name:   "block-payments",
+			Match:  Match{Path: mustDoublestar(t, "**/payments/**")},
+			Action: ActionBlock,
+		},
+	)
+	a, r := p.DecidePath("/src/payments/test/fixture.go")
+	if a != ActionAllow {
+		t.Errorf("action = %v, want Allow", a)
+	}
+	if r == nil || r.Name != "allow-payments-tests" {
+		t.Errorf("rule = %+v, want allow-payments-tests", r)
+	}
+}
+
+func TestDecidePath_AllMatchesAnyPath(t *testing.T) {
+	p := mustPolicy(t, Rule{
+		Name:   "default",
+		Match:  Match{All: true},
+		Action: ActionWarn,
+	})
+	a, r := p.DecidePath("/anything")
+	if a != ActionWarn {
+		t.Errorf("action = %v, want Warn", a)
+	}
+	if r == nil || r.Name != "default" {
+		t.Errorf("rule = %+v, want default", r)
+	}
+}
+
+func TestDecidePath_ConcurrentSafe(t *testing.T) {
+	p := mustPolicy(t,
+		Rule{Name: "block-payments", Match: Match{Path: mustDoublestar(t, "**/payments/**")}, Action: ActionBlock},
+	)
+	done := make(chan struct{})
+	for i := 0; i < 50; i++ {
+		go func(i int) {
+			path := "/src/payments/charge.go"
+			if i%2 == 0 {
+				path = "/src/other/foo.go"
+			}
+			a, _ := p.DecidePath(path)
+			_ = a
+			done <- struct{}{}
+		}(i)
+	}
+	for i := 0; i < 50; i++ {
+		<-done
+	}
+}
