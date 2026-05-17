@@ -52,7 +52,7 @@ type Rule struct {
 // e.g., Pattern!=nil AND Severity!=nil means both must match.
 //
 // The loader rejects a Match with no conditions at all, so at least one
-// of {Pattern, Severity, All} is always meaningful.
+// of {Pattern, Severity, All, Path} is always meaningful.
 type Match struct {
 	Pattern  *globPattern       // nil = no pattern condition
 	Severity *detector.Severity // nil = no severity condition

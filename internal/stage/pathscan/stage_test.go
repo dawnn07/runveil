@@ -211,3 +211,90 @@ func TestPathFinding_MarshalJSON_RuleOmittedWhenEmpty(t *testing.T) {
 		t.Errorf("rule field should be omitted when empty; got %s", string(data))
 	}
 }
+
+func TestPathscan_ReadToolWarnedStoresFinding(t *testing.T) {
+	pol := mkPolicy(t, `
+version: 1
+rules:
+  - name: warn-payments
+    match: {path: "**/payments/**"}
+    action: warn
+`)
+	s := New(Config{Policy: pol}, discardLogger())
+	body := `{
+		"messages": [
+			{"role": "assistant", "content": [
+				{"type": "tool_use", "id": "t1", "name": "Read",
+				 "input": {"file_path": "/src/payments/x.go"}}
+			]}
+		]
+	}`
+	rc := newRC(t, "api.anthropic.com", body, http.MethodPost, "/v1/messages")
+	dec, err := s.Process(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if dec != pipeline.Continue {
+		t.Fatalf("decision = %v, want Continue (warn never blocks)", dec)
+	}
+	findings, ok := rc.Metadata["pathscan.findings"].([]PathFinding)
+	if !ok || len(findings) != 1 {
+		t.Fatalf("expected 1 finding in metadata, got %v", rc.Metadata["pathscan.findings"])
+	}
+	if findings[0].Rule != "warn-payments" {
+		t.Errorf("Rule = %q, want warn-payments", findings[0].Rule)
+	}
+}
+
+func TestPathscan_MixedActionsBlockWins(t *testing.T) {
+	// Two tool_use events: one matches allow, one matches block.
+	// Expect Block decision; allowed event suppressed from metadata.
+	pol := mkPolicy(t, `
+version: 1
+rules:
+  - name: allow-tests
+    match: {path: "**/test/**"}
+    action: allow
+  - name: block-payments
+    match: {path: "**/payments/**"}
+    action: block
+`)
+	s := New(Config{Policy: pol}, discardLogger())
+	body := `{
+		"messages": [
+			{"role": "assistant", "content": [
+				{"type": "tool_use", "id": "a", "name": "Read",
+				 "input": {"file_path": "/src/test/fixture.go"}},
+				{"type": "tool_use", "id": "b", "name": "Read",
+				 "input": {"file_path": "/src/payments/charge.go"}}
+			]}
+		]
+	}`
+	rc := newRC(t, "api.anthropic.com", body, http.MethodPost, "/v1/messages")
+	dec, err := s.Process(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if dec != pipeline.Block {
+		t.Fatalf("decision = %v, want Block (one event blocks)", dec)
+	}
+	findings, _ := rc.Metadata["pathscan.findings"].([]PathFinding)
+	sawTest, sawPayments := false, false
+	for _, f := range findings {
+		if f.Path == "/src/test/fixture.go" {
+			sawTest = true
+		}
+		if f.Path == "/src/payments/charge.go" {
+			sawPayments = true
+			if f.Rule != "block-payments" {
+				t.Errorf("payments rule = %q, want block-payments", f.Rule)
+			}
+		}
+	}
+	if sawTest {
+		t.Error("allowed test path should be suppressed from metadata")
+	}
+	if !sawPayments {
+		t.Error("expected payments path in metadata")
+	}
+}

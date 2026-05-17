@@ -614,3 +614,43 @@ func TestProxy_BlockBodyIncludesPathFindings(t *testing.T) {
 		t.Errorf("rule = %v, want block-payments", f["rule"])
 	}
 }
+
+// panicIfCalledStage panics if its Process method runs. Used to verify
+// that an earlier-in-chain stage returning Block prevents this one from
+// ever executing.
+type panicIfCalledStage struct{}
+
+func (panicIfCalledStage) Name() string { return "panic-if-called" }
+func (panicIfCalledStage) Process(_ context.Context, _ *pipeline.RequestCtx) (pipeline.Decision, error) {
+	panic("panicIfCalledStage.Process must not be called when earlier stage blocked")
+}
+
+func TestProxy_PathBlockTakesPrecedence(t *testing.T) {
+	srv, addr := newTestServer(t)
+	// Register pathBlockStage first (so it Block's), then a panicking
+	// stage that proves no further stages run after Block.
+	srv.cfg.Pipeline.Register(pathBlockStage{})
+	srv.cfg.Pipeline.Register(panicIfCalledStage{})
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(srv.cfg.CA.RootCert())
+	proxyURL, _ := url.Parse("http://" + addr)
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "block.test"},
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get("https://block.test/")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+	// If we reached here, panicIfCalledStage was never invoked — the
+	// pipeline halted at the first Block decision. Success.
+}
