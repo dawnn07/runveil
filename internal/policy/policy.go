@@ -18,8 +18,8 @@ type Action int
 
 const (
 	ActionWarn  Action = iota // default
-	ActionAllow                // suppress this finding
-	ActionBlock                // halt the request
+	ActionAllow               // suppress this finding
+	ActionBlock               // halt the request
 )
 
 // String returns a stable lowercase name for logs and JSON.
@@ -54,8 +54,8 @@ type Rule struct {
 // The loader rejects a Match with no conditions at all, so at least one
 // of {Pattern, Severity, All} is always meaningful.
 type Match struct {
-	Pattern  *globPattern        // nil = no pattern condition
-	Severity *detector.Severity  // nil = no severity condition
+	Pattern  *globPattern       // nil = no pattern condition
+	Severity *detector.Severity // nil = no severity condition
 	All      bool
 }
 

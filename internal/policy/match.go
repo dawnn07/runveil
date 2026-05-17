@@ -11,8 +11,8 @@ import (
 //
 // Supported metacharacters:
 //
-//   *  matches any sequence of characters (including empty)
-//   ?  matches exactly one character
+//   - matches any sequence of characters (including empty)
+//     ?  matches exactly one character
 //
 // All other characters are matched literally. Regex metacharacters in
 // the input are quoted via regexp.QuoteMeta so they cannot escape into
