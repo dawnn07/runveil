@@ -570,3 +570,65 @@ func TestLoadFromFile_NonExistentFails(t *testing.T) {
 		t.Fatal("expected error for non-existent file")
 	}
 }
+
+func TestCompileDoublestar_MatchesDeepPaths(t *testing.T) {
+	d, err := compileDoublestar("**/payments/**")
+	if err != nil {
+		t.Fatalf("compileDoublestar: %v", err)
+	}
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{"/a/b/payments/c.go", true},
+		{"/payments/x", true},
+		{"src/payments/charge/charge.go", true},
+		{"/foo/bar", false},
+		{"payments_old/x", false},
+	}
+	for _, c := range cases {
+		if got := d.match(c.path); got != c.want {
+			t.Errorf("doublestar(**/payments/**).match(%q) = %v, want %v", c.path, got, c.want)
+		}
+	}
+}
+
+func TestCompileDoublestar_MatchesAwsConfig(t *testing.T) {
+	d, err := compileDoublestar("**/.aws/**")
+	if err != nil {
+		t.Fatalf("compileDoublestar: %v", err)
+	}
+	if !d.match("/home/u/.aws/credentials") {
+		t.Error("expected match on /home/u/.aws/credentials")
+	}
+	if d.match("/home/u/aws/x") {
+		t.Error("expected NO match on /home/u/aws/x (no dot prefix)")
+	}
+}
+
+func TestCompileDoublestar_AnchoredPrefix(t *testing.T) {
+	d, err := compileDoublestar("/etc/**")
+	if err != nil {
+		t.Fatalf("compileDoublestar: %v", err)
+	}
+	if !d.match("/etc/foo") {
+		t.Error("expected match on /etc/foo")
+	}
+	if d.match("/usr/etc/foo") {
+		t.Error("expected NO match on /usr/etc/foo (anchored prefix)")
+	}
+}
+
+func TestCompileDoublestar_EmptyIsInvalid(t *testing.T) {
+	_, err := compileDoublestar("")
+	if err == nil {
+		t.Error("expected error for empty doublestar")
+	}
+}
+
+func TestDoublestarPattern_NilSafe(t *testing.T) {
+	var d *doublestarPattern
+	if d.match("/anything") {
+		t.Error("nil doublestar should not match")
+	}
+}

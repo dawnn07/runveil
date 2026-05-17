@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/bmatcuk/doublestar/v4"
 )
 
 // globPattern is a compiled glob. We translate the glob syntax into a
@@ -56,4 +58,38 @@ func (g *globPattern) match(name string) bool {
 		return false
 	}
 	return g.re.MatchString(name)
+}
+
+// doublestarPattern is a compiled file-path glob using doublestar
+// syntax: ** matches any number of path segments, * matches within
+// one segment.
+//
+// We use github.com/bmatcuk/doublestar/v4 — the de facto Go standard
+// implementation.
+type doublestarPattern struct {
+	raw string
+}
+
+// compileDoublestar validates a doublestar glob by calling
+// doublestar.PathMatch with a dummy input. Returns an error on
+// invalid syntax or empty input.
+func compileDoublestar(s string) (*doublestarPattern, error) {
+	if s == "" {
+		return nil, fmt.Errorf("empty doublestar pattern")
+	}
+	if _, err := doublestar.PathMatch(s, ""); err != nil {
+		return nil, fmt.Errorf("compile doublestar %q: %w", s, err)
+	}
+	return &doublestarPattern{raw: s}, nil
+}
+
+func (d *doublestarPattern) match(path string) bool {
+	if d == nil {
+		return false
+	}
+	matched, err := doublestar.PathMatch(d.raw, path)
+	if err != nil {
+		return false
+	}
+	return matched
 }
