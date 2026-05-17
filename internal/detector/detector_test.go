@@ -356,3 +356,21 @@ func TestAddPattern_RegistersAtRuntime(t *testing.T) {
 		t.Fatalf("Scan did not see the runtime-added pattern; got %+v", findings)
 	}
 }
+
+// TestScan_Base64WrappedSecret documents that Scan does not decode
+// base64 before applying patterns. A secret embedded as base64 in
+// text will not be detected. This test exists to make the limitation
+// explicit; if future work adds base64 decoding, this test should
+// flip to expecting a finding.
+func TestScan_Base64WrappedSecret(t *testing.T) {
+	// AKIAIOSFODNN7EXAMPLE base64-encoded.
+	text := "wrapped: QUtJQUlPU0ZPRE5ON0VYQU1QTEU="
+	for _, f := range Scan(text) {
+		if f.Pattern == "aws_access_key_id" {
+			t.Fatalf("base64 wrapper unexpectedly matched aws_access_key_id: %+v", f)
+		}
+	}
+	// Test passes whether Scan returns zero findings or some findings of
+	// other patterns — the contract is only that aws_access_key_id does
+	// NOT fire on the base64 wrapper.
+}

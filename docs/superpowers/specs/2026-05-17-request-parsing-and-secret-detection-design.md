@@ -413,7 +413,7 @@ Record the result in this spec's §10 Acceptance Result section (added on comple
 
 **Catalog properties:**
 
-- 23 High, 4 Medium, 3 Low. Only High is eligible for Block when `--block-on-detect` is set.
+- 25 High, 4 Medium, 1 Low. Only High is eligible for Block when `--block-on-detect` is set.
 - Patterns with historically high FP rates (#11, #28, #29, #30) are Medium or Low so they never block.
 - **Provenance:** patterns derived from open-source `secretlint` (MIT), `trufflehog` (AGPL for some pattern files; the regex *strings themselves* are facts, not copyrightable expression — we cite the source in the patterns.go header for hygiene), and `gitleaks` (MIT). Documented in the file's package comment.
 
