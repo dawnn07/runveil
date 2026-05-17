@@ -28,6 +28,7 @@ type yamlMatch struct {
 	Pattern  string `yaml:"pattern,omitempty"`
 	Severity string `yaml:"severity,omitempty"`
 	All      bool   `yaml:"all,omitempty"`
+	Path     string `yaml:"path,omitempty"`
 }
 
 // LoadFromFile reads, parses, validates, and compiles a policy YAML file.
@@ -119,12 +120,16 @@ func compileMatch(ym yamlMatch) (Match, error) {
 	hasPattern := ym.Pattern != ""
 	hasSeverity := ym.Severity != ""
 	hasAll := ym.All
+	hasPath := ym.Path != ""
 
-	if !hasPattern && !hasSeverity && !hasAll {
+	if !hasPattern && !hasSeverity && !hasAll && !hasPath {
 		return Match{}, fmt.Errorf("match is required and must contain at least one condition")
 	}
-	if hasAll && (hasPattern || hasSeverity) {
+	if hasAll && (hasPattern || hasSeverity || hasPath) {
 		return Match{}, fmt.Errorf("match.all cannot be combined with other conditions")
+	}
+	if hasPath && (hasPattern || hasSeverity) {
+		return Match{}, fmt.Errorf("match.path cannot be combined with secret-finding conditions (pattern/severity) in this version")
 	}
 
 	m := Match{All: hasAll}
@@ -143,6 +148,14 @@ func compileMatch(ym yamlMatch) (Match, error) {
 			return Match{}, err
 		}
 		m.Severity = &s
+	}
+
+	if hasPath {
+		d, err := compileDoublestar(ym.Path)
+		if err != nil {
+			return Match{}, fmt.Errorf("invalid path %q: %w", ym.Path, err)
+		}
+		m.Path = d
 	}
 
 	return m, nil

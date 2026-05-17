@@ -762,3 +762,79 @@ func TestDecidePath_ConcurrentSafe(t *testing.T) {
 		<-done
 	}
 }
+
+func TestLoadFromBytes_PathField(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: block-payments
+    match: {path: "**/payments/**"}
+    action: block
+`)
+	p, err := LoadFromBytes(yaml)
+	if err != nil {
+		t.Fatalf("LoadFromBytes: %v", err)
+	}
+	if p.Rules[0].Match.Path == nil {
+		t.Fatal("Path not compiled")
+	}
+	if !p.Rules[0].Match.Path.match("/src/payments/x.go") {
+		t.Error("compiled path glob does not match /src/payments/x.go")
+	}
+}
+
+func TestLoadFromBytes_PathPlusPatternRejected(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: r
+    match: {path: "**/foo/**", pattern: aws_*}
+    action: block
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for path + pattern combination")
+	}
+}
+
+func TestLoadFromBytes_PathPlusSeverityRejected(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: r
+    match: {path: "**/foo/**", severity: high}
+    action: block
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for path + severity combination")
+	}
+}
+
+func TestLoadFromBytes_PathPlusAllRejected(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: r
+    match: {path: "**/foo/**", all: true}
+    action: block
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for path + all combination")
+	}
+}
+
+func TestLoadFromBytes_EmptyPathRejected(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: r
+    match: {path: ""}
+    action: block
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for empty path")
+	}
+}
