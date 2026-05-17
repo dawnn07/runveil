@@ -548,3 +548,30 @@ Sub-project #4 is complete when:
 4. The design doc and implementation are committed to the repo.
 
 When these four hold, sub-project #5 (CLI + daemon management) or #6 (audit logging) can begin without further changes to the path-scanning architecture.
+
+---
+
+## 11. Acceptance Result
+
+**Date:** 2026-05-17
+**Tool exercised:** Claude Code via `HTTPS_PROXY` + `NODE_EXTRA_CA_CERTS`.
+
+**Test policy:**
+```yaml
+version: 1
+rules:
+  - name: block-payments
+    match: {path: "**/payments/**"}
+    action: block
+  - name: warn-everything-else
+    match: {all: true}
+    action: warn
+```
+
+**Path block rule:** Pass.
+
+- Claude Code's agent attempted `Read` against a payments-path file → 403 returned to the tool call.
+- Proxy log: `WARN pathscan blocked rule=block-payments tool=Read path=...`.
+- 403 response body included `findings[0].detector = "path-scan"`, `tool = "Read"`, `rule = "block-payments"`.
+
+**Status:** Pass. Sub-project #4 done definition §10 satisfied. Railcore now governs agentic AI file access in addition to secret detection — the agentic-control surface from [`part1.md`](../../../part1.md) §1.4 point #3 is implemented and verified.
