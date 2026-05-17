@@ -52,3 +52,42 @@ func TestShannonEntropy(t *testing.T) {
 		}
 	}
 }
+
+func TestScan_AWSAccessKeyID_Positive(t *testing.T) {
+	text := `here is my key AKIAIOSFODNN7EXAMPLE for the bucket`
+	findings := Scan(text)
+	want := "aws_access_key_id"
+	found := false
+	for _, f := range findings {
+		if f.Pattern == want && f.Severity == SeverityHigh {
+			found = true
+			if got := text[f.Offset : f.Offset+f.Length]; got != "AKIAIOSFODNN7EXAMPLE" {
+				t.Errorf("matched substring = %q, want %q", got, "AKIAIOSFODNN7EXAMPLE")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("Scan did not find aws_access_key_id in %q; got %+v", text, findings)
+	}
+}
+
+func TestScan_AWSAccessKeyID_LowEntropySuffixRejected(t *testing.T) {
+	// AKIA + all-zeros suffix has entropy 0, must NOT match.
+	text := "value: AKIA0000000000000000"
+	findings := Scan(text)
+	for _, f := range findings {
+		if f.Pattern == "aws_access_key_id" {
+			t.Fatalf("low-entropy AWS suffix should be filtered, but got finding %+v", f)
+		}
+	}
+}
+
+func TestScan_AWSAccessKeyID_NoFalseMatch(t *testing.T) {
+	text := "this string contains the word akia in lowercase and AKIA only"
+	findings := Scan(text)
+	for _, f := range findings {
+		if f.Pattern == "aws_access_key_id" {
+			t.Fatalf("expected no aws_access_key_id finding in %q, got %+v", text, f)
+		}
+	}
+}
