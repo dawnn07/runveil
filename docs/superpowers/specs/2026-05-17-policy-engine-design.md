@@ -452,3 +452,32 @@ Sub-project #3 is complete when:
 4. The design doc and implementation are committed to the repo.
 
 When these four hold, sub-project #4 (path/repo/content classifiers) can begin adding `path` and similar match conditions to the existing YAML schema and rule-eval framework.
+
+---
+
+## 11. Acceptance Result
+
+**Date:** 2026-05-17
+**Tool exercised:** Claude Code via `HTTPS_PROXY` + `NODE_EXTRA_CA_CERTS`.
+
+**Test policy used:**
+```yaml
+version: 1
+rules:
+  - name: block-aws
+    match: {pattern: aws_*}
+    action: block
+  - name: warn-everything-else
+    match: {all: true}
+    action: warn
+```
+
+**Block rule:** Pass.
+
+- Synthetic AWS key in prompt → 403 returned to Claude Code.
+- Proxy log showed: `WARN secretscan blocked block_rules=[block-aws]` followed by `request complete decision=block status=403`.
+- 403 response body contained `findings[0].rule = "block-aws"`; matched bytes (`AKIA...`) did not appear anywhere in Railcore-generated output.
+
+**Allow rule:** Verified via separate policy variation. When `allow-aws-temporarily` precedes `block-github`, sending an AWS key produces `decision=continue` with no `secretscan` log line (silent suppression, as designed). Allowed findings are absent from `rc.Metadata` and from any client-visible body.
+
+**Status:** Pass. Sub-project #3 done definition §10 satisfied. YAML policy file now drives Railcore decisions end-to-end — operators can author site-specific rules without recompiling.
