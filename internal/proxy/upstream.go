@@ -87,7 +87,8 @@ func (s *Server) newHandler(host, requestID string) http.Handler {
 		dec, _ := s.cfg.Pipeline.Run(r.Context(), rc)
 		decision = dec
 		if dec == pipeline.Block {
-			writeJSONResp(w, http.StatusForbidden, "blocked by railcore policy", "request_id", requestID)
+			findings := rc.Metadata["secretscan.findings"]
+			writeBlockResp(w, requestID, findings)
 			return
 		}
 
@@ -174,6 +175,27 @@ func (s *Server) upstreamTLSConfig(serverName string) *tls.Config {
 func isMaxBytesErr(err error) bool {
 	var mbe *http.MaxBytesError
 	return errors.As(err, &mbe)
+}
+
+// writeBlockResp writes a 403 with a JSON body listing the findings (if
+// any). The findings value comes from rc.Metadata["secretscan.findings"]
+// and may be []secretscan.EnrichedFinding (production) or a slice of
+// maps with the same public keys (tests). Both shapes serialize to the
+// same JSON because EnrichedFinding implements MarshalJSON.
+//
+// Matched bytes are deliberately never echoed in this body.
+func writeBlockResp(w http.ResponseWriter, requestID string, findings any) {
+	body := map[string]any{
+		"error":      "blocked by railcore policy",
+		"request_id": requestID,
+		"detector":   "secret-scan",
+	}
+	if findings != nil {
+		body["findings"] = findings
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(body)
 }
 
 // byteReader is an io.Reader over a fixed []byte. Used to re-create a
