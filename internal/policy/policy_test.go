@@ -128,3 +128,164 @@ func TestCompileGlob_EmptyIsInvalid(t *testing.T) {
 		t.Error("compileGlob(\"\") should return an error")
 	}
 }
+
+func mustPolicy(t *testing.T, rules ...Rule) *Policy {
+	t.Helper()
+	return &Policy{Version: 1, Rules: rules}
+}
+
+func mustGlob(t *testing.T, s string) *globPattern {
+	t.Helper()
+	g, err := compileGlob(s)
+	if err != nil {
+		t.Fatalf("compileGlob(%q): %v", s, err)
+	}
+	return g
+}
+
+func sevPtr(s detector.Severity) *detector.Severity { return &s }
+
+func TestDecide_SinglePatternMatchBlocks(t *testing.T) {
+	p := mustPolicy(t, Rule{
+		Name:   "block-aws",
+		Match:  Match{Pattern: mustGlob(t, "aws_*")},
+		Action: ActionBlock,
+	})
+	a, r := p.Decide(detector.Finding{Pattern: "aws_access_key_id", Severity: detector.SeverityHigh})
+	if a != ActionBlock {
+		t.Errorf("action = %v, want ActionBlock", a)
+	}
+	if r == nil || r.Name != "block-aws" {
+		t.Errorf("rule = %+v, want block-aws", r)
+	}
+}
+
+func TestDecide_FirstMatchWins(t *testing.T) {
+	p := mustPolicy(t,
+		Rule{
+			Name:   "allow-fixture",
+			Match:  Match{Pattern: mustGlob(t, "aws_access_key_id")},
+			Action: ActionAllow,
+		},
+		Rule{
+			Name:   "block-aws",
+			Match:  Match{Pattern: mustGlob(t, "aws_*")},
+			Action: ActionBlock,
+		},
+	)
+	a, r := p.Decide(detector.Finding{Pattern: "aws_access_key_id", Severity: detector.SeverityHigh})
+	if a != ActionAllow {
+		t.Errorf("action = %v, want ActionAllow", a)
+	}
+	if r == nil || r.Name != "allow-fixture" {
+		t.Errorf("rule = %+v, want allow-fixture", r)
+	}
+}
+
+func TestDecide_NoRuleMatchesReturnsWarn(t *testing.T) {
+	p := mustPolicy(t,
+		Rule{
+			Name:   "block-github",
+			Match:  Match{Pattern: mustGlob(t, "github_*")},
+			Action: ActionBlock,
+		},
+	)
+	a, r := p.Decide(detector.Finding{Pattern: "aws_access_key_id", Severity: detector.SeverityHigh})
+	if a != ActionWarn {
+		t.Errorf("action = %v, want ActionWarn", a)
+	}
+	if r != nil {
+		t.Errorf("rule = %+v, want nil", r)
+	}
+}
+
+func TestDecide_SeverityMatch(t *testing.T) {
+	p := mustPolicy(t,
+		Rule{
+			Name:   "warn-medium",
+			Match:  Match{Severity: sevPtr(detector.SeverityMedium)},
+			Action: ActionWarn,
+		},
+		Rule{
+			Name:   "block-high",
+			Match:  Match{Severity: sevPtr(detector.SeverityHigh)},
+			Action: ActionBlock,
+		},
+	)
+	a, _ := p.Decide(detector.Finding{Pattern: "x", Severity: detector.SeverityMedium})
+	if a != ActionWarn {
+		t.Errorf("medium → %v, want ActionWarn", a)
+	}
+	a, _ = p.Decide(detector.Finding{Pattern: "x", Severity: detector.SeverityHigh})
+	if a != ActionBlock {
+		t.Errorf("high → %v, want ActionBlock", a)
+	}
+	a, _ = p.Decide(detector.Finding{Pattern: "x", Severity: detector.SeverityLow})
+	if a != ActionWarn {
+		t.Errorf("low → %v, want ActionWarn (no rule matches)", a)
+	}
+}
+
+func TestDecide_PatternAndSeverityANDed(t *testing.T) {
+	p := mustPolicy(t, Rule{
+		Name:   "block-high-aws",
+		Match:  Match{Pattern: mustGlob(t, "aws_*"), Severity: sevPtr(detector.SeverityHigh)},
+		Action: ActionBlock,
+	})
+	a, _ := p.Decide(detector.Finding{Pattern: "aws_access_key_id", Severity: detector.SeverityHigh})
+	if a != ActionBlock {
+		t.Errorf("aws+high → %v, want ActionBlock", a)
+	}
+	a, _ = p.Decide(detector.Finding{Pattern: "aws_access_key_id", Severity: detector.SeverityLow})
+	if a != ActionWarn {
+		t.Errorf("aws+low → %v, want ActionWarn", a)
+	}
+	a, _ = p.Decide(detector.Finding{Pattern: "github_pat_classic", Severity: detector.SeverityHigh})
+	if a != ActionWarn {
+		t.Errorf("github+high → %v, want ActionWarn", a)
+	}
+}
+
+func TestDecide_AllMatchesAnything(t *testing.T) {
+	p := mustPolicy(t, Rule{
+		Name:   "default",
+		Match:  Match{All: true},
+		Action: ActionWarn,
+	})
+	cases := []detector.Finding{
+		{Pattern: "aws_access_key_id", Severity: detector.SeverityHigh},
+		{Pattern: "anything", Severity: detector.SeverityLow},
+		{Pattern: "jwt", Severity: detector.SeverityMedium},
+	}
+	for _, f := range cases {
+		a, r := p.Decide(f)
+		if a != ActionWarn {
+			t.Errorf("all-match on %+v → %v, want ActionWarn", f, a)
+		}
+		if r == nil || r.Name != "default" {
+			t.Errorf("all-match on %+v → rule %v, want default", f, r)
+		}
+	}
+}
+
+func TestDecide_ConcurrentSafe(t *testing.T) {
+	p := mustPolicy(t,
+		Rule{Name: "block-aws", Match: Match{Pattern: mustGlob(t, "aws_*")}, Action: ActionBlock},
+		Rule{Name: "default", Match: Match{All: true}, Action: ActionWarn},
+	)
+	done := make(chan struct{})
+	for i := 0; i < 50; i++ {
+		go func(i int) {
+			f := detector.Finding{Pattern: "aws_access_key_id"}
+			if i%2 == 0 {
+				f = detector.Finding{Pattern: "other"}
+			}
+			a, _ := p.Decide(f)
+			_ = a
+			done <- struct{}{}
+		}(i)
+	}
+	for i := 0; i < 50; i++ {
+		<-done
+	}
+}
