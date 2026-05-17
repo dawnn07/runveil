@@ -1,6 +1,9 @@
 package detector
 
-import "testing"
+import (
+	"regexp"
+	"testing"
+)
 
 func TestSeverity_String(t *testing.T) {
 	cases := []struct {
@@ -321,4 +324,35 @@ func repeat(s string, n int) string {
 		out = append(out, s...)
 	}
 	return string(out)
+}
+
+func TestAddPattern_RegistersAtRuntime(t *testing.T) {
+	mu.RLock()
+	before := len(patterns)
+	mu.RUnlock()
+
+	AddPattern(Pattern{
+		Name:     "test_runtime_pattern",
+		Severity: SeverityHigh,
+		Regex:    regexp.MustCompile(`runtime-secret-[0-9]+`),
+	})
+
+	mu.RLock()
+	after := len(patterns)
+	mu.RUnlock()
+	if after != before+1 {
+		t.Fatalf("AddPattern did not grow registry: before=%d after=%d", before, after)
+	}
+
+	findings := Scan("here is runtime-secret-12345 in text")
+	found := false
+	for _, f := range findings {
+		if f.Pattern == "test_runtime_pattern" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Scan did not see the runtime-added pattern; got %+v", findings)
+	}
 }
