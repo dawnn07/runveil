@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"os"
 	"testing"
 
 	"railcore/internal/detector"
@@ -538,5 +539,34 @@ func TestLoadFromBytes_MalformedYAML(t *testing.T) {
 	_, err := LoadFromBytes([]byte("{ not valid yaml :"))
 	if err == nil {
 		t.Fatal("expected error for malformed YAML")
+	}
+}
+
+func TestLoadFromFile_RoundTripsViaDisk(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/policy.yaml"
+	content := []byte(`
+version: 1
+rules:
+  - name: block-aws
+    match: {pattern: aws_*}
+    action: block
+`)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("write temp policy: %v", err)
+	}
+	p, err := LoadFromFile(path)
+	if err != nil {
+		t.Fatalf("LoadFromFile: %v", err)
+	}
+	if len(p.Rules) != 1 || p.Rules[0].Name != "block-aws" {
+		t.Errorf("loaded policy mismatch: %+v", p.Rules)
+	}
+}
+
+func TestLoadFromFile_NonExistentFails(t *testing.T) {
+	_, err := LoadFromFile("/nonexistent/does-not-exist.yaml")
+	if err == nil {
+		t.Fatal("expected error for non-existent file")
 	}
 }
