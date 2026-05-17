@@ -31,3 +31,24 @@ func TestScan_EmptyTextReturnsEmpty(t *testing.T) {
 		t.Fatalf("expected 0 findings on empty text, got %d", len(findings))
 	}
 }
+
+func TestShannonEntropy(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		min  float64
+		max  float64
+	}{
+		{"empty", "", 0, 0},
+		{"single char repeated", "aaaaaaaaaa", 0, 0.001},
+		{"two equal chars", "abababab", 0.999, 1.001},
+		{"random-looking 16-char suffix", "IOSFODNN7EXAMPLE", 3.4, 4.1},
+		{"high-entropy hex", "0123456789abcdef0123456789abcdef", 3.9, 4.001},
+	}
+	for _, tc := range cases {
+		got := shannonEntropy(tc.in)
+		if got < tc.min || got > tc.max {
+			t.Errorf("shannonEntropy(%q) = %f, want in [%f, %f]", tc.in, got, tc.min, tc.max)
+		}
+	}
+}
