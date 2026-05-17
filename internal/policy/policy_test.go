@@ -289,3 +289,254 @@ func TestDecide_ConcurrentSafe(t *testing.T) {
 		<-done
 	}
 }
+
+func TestLoadFromBytes_MinimalValidPolicy(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: block-aws
+    match:
+      pattern: aws_*
+    action: block
+`)
+	p, err := LoadFromBytes(yaml)
+	if err != nil {
+		t.Fatalf("LoadFromBytes: %v", err)
+	}
+	if p.Version != 1 {
+		t.Errorf("Version = %d, want 1", p.Version)
+	}
+	if len(p.Rules) != 1 {
+		t.Fatalf("Rules len = %d, want 1", len(p.Rules))
+	}
+	r := p.Rules[0]
+	if r.Name != "block-aws" || r.Action != ActionBlock {
+		t.Errorf("rule = %+v", r)
+	}
+	if r.Match.Pattern == nil || !r.Match.Pattern.match("aws_access_key_id") {
+		t.Errorf("pattern not compiled / not matching: %+v", r.Match)
+	}
+}
+
+func TestLoadFromBytes_AllActionsParse(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: a
+    match: {all: true}
+    action: allow
+  - name: b
+    match: {all: true}
+    action: block
+  - name: c
+    match: {all: true}
+    action: warn
+`)
+	p, err := LoadFromBytes(yaml)
+	if err != nil {
+		t.Fatalf("LoadFromBytes: %v", err)
+	}
+	want := []Action{ActionAllow, ActionBlock, ActionWarn}
+	for i, w := range want {
+		if p.Rules[i].Action != w {
+			t.Errorf("rule[%d].Action = %v, want %v", i, p.Rules[i].Action, w)
+		}
+	}
+}
+
+func TestLoadFromBytes_SeverityMatchParses(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: warn-medium
+    match: {severity: medium}
+    action: warn
+`)
+	p, err := LoadFromBytes(yaml)
+	if err != nil {
+		t.Fatalf("LoadFromBytes: %v", err)
+	}
+	if p.Rules[0].Match.Severity == nil || *p.Rules[0].Match.Severity != detector.SeverityMedium {
+		t.Errorf("severity not parsed: %+v", p.Rules[0].Match.Severity)
+	}
+}
+
+func TestLoadFromBytes_NoteFieldIgnored(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: r
+    match: {all: true}
+    action: allow
+    note: this is a comment
+`)
+	p, err := LoadFromBytes(yaml)
+	if err != nil {
+		t.Fatalf("LoadFromBytes: %v", err)
+	}
+	if p.Rules[0].Note != "this is a comment" {
+		t.Errorf("Note = %q, want %q", p.Rules[0].Note, "this is a comment")
+	}
+}
+
+// --- error cases ---
+
+func TestLoadFromBytes_MissingVersion(t *testing.T) {
+	yaml := []byte(`
+rules:
+  - name: r
+    match: {all: true}
+    action: warn
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for missing version")
+	}
+}
+
+func TestLoadFromBytes_UnsupportedVersion(t *testing.T) {
+	yaml := []byte(`
+version: 2
+rules:
+  - name: r
+    match: {all: true}
+    action: warn
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for version 2")
+	}
+}
+
+func TestLoadFromBytes_EmptyRules(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules: []
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for empty rules")
+	}
+}
+
+func TestLoadFromBytes_RuleWithoutName(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - match: {all: true}
+    action: warn
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for rule without name")
+	}
+}
+
+func TestLoadFromBytes_DuplicateRuleName(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: r
+    match: {all: true}
+    action: warn
+  - name: r
+    match: {all: true}
+    action: block
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for duplicate rule name")
+	}
+}
+
+func TestLoadFromBytes_EmptyMatch(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: r
+    match: {}
+    action: warn
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for empty match")
+	}
+}
+
+func TestLoadFromBytes_AllPlusOtherCondition(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: r
+    match: {all: true, pattern: aws_*}
+    action: warn
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for all combined with another condition")
+	}
+}
+
+func TestLoadFromBytes_InvalidAction(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: r
+    match: {all: true}
+    action: bock
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for invalid action")
+	}
+}
+
+func TestLoadFromBytes_InvalidSeverity(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rules:
+  - name: r
+    match: {severity: critical}
+    action: warn
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for invalid severity")
+	}
+}
+
+func TestLoadFromBytes_InvalidGlob(t *testing.T) {
+	// Empty glob is invalid per compileGlob (Task 2).
+	yaml := []byte(`
+version: 1
+rules:
+  - name: r
+    match: {pattern: ""}
+    action: warn
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for empty glob")
+	}
+}
+
+func TestLoadFromBytes_UnknownField(t *testing.T) {
+	yaml := []byte(`
+version: 1
+rulez:
+  - name: r
+    match: {all: true}
+    action: warn
+`)
+	_, err := LoadFromBytes(yaml)
+	if err == nil {
+		t.Fatal("expected error for unknown top-level field 'rulez'")
+	}
+}
+
+func TestLoadFromBytes_MalformedYAML(t *testing.T) {
+	_, err := LoadFromBytes([]byte("{ not valid yaml :"))
+	if err == nil {
+		t.Fatal("expected error for malformed YAML")
+	}
+}
