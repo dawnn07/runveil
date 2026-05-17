@@ -81,7 +81,7 @@ func (s *Server) newHandler(host, requestID string) http.Handler {
 		rc := &pipeline.RequestCtx{
 			Req:       r,
 			Host:      host,
-			Metadata:  map[string]any{"request_id": requestID},
+			Metadata:  map[string]any{"request_id": requestID, "body": body},
 			StartedAt: time.Now(),
 		}
 		dec, _ := s.cfg.Pipeline.Run(r.Context(), rc)

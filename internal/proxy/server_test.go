@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -375,5 +376,117 @@ func TestProxy_ConcurrentRequestsNoLeaks(t *testing.T) {
 	close(errs)
 	for err := range errs {
 		t.Errorf("request failed: %v", err)
+	}
+}
+
+type bodyCaptureStage struct {
+	captured []byte
+}
+
+func (s *bodyCaptureStage) Name() string { return "body-capture" }
+func (s *bodyCaptureStage) Process(_ context.Context, rc *pipeline.RequestCtx) (pipeline.Decision, error) {
+	if b, ok := rc.Metadata["body"].([]byte); ok {
+		s.captured = b
+	}
+	return pipeline.Continue, nil
+}
+
+func TestProxy_StashesBodyInMetadata(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	t.Cleanup(upstream.Close)
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+	upstreamPool := x509.NewCertPool()
+	upstreamPool.AddCert(upstream.Certificate())
+
+	srv, addr := newTestServer(t)
+	srv.cfg.UpstreamTLS = &tls.Config{RootCAs: upstreamPool, ServerName: upstreamURL.Hostname()}
+	srv.cfg.UpstreamResolver = func(_ string) (string, error) { return upstreamURL.Host, nil }
+
+	stage := &bodyCaptureStage{}
+	srv.cfg.Pipeline.Register(stage)
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(srv.cfg.CA.RootCert())
+	proxyURL, _ := url.Parse("http://" + addr)
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "bodytest.test"},
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	wantBody := `{"hello":"world"}`
+	resp, err := client.Post("https://bodytest.test/x", "application/json", strings.NewReader(wantBody))
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if string(stage.captured) != wantBody {
+		t.Fatalf("stashed body = %q, want %q", string(stage.captured), wantBody)
+	}
+}
+
+// awsKeyBlockStage simulates secretscan: registers a finding in metadata
+// and returns Block. Lets us test the proxy's 403 body shaping without
+// pulling in the real secretscan package (avoids test cycle).
+type awsKeyBlockStage struct{}
+
+func (awsKeyBlockStage) Name() string { return "test-block-with-findings" }
+func (awsKeyBlockStage) Process(_ context.Context, rc *pipeline.RequestCtx) (pipeline.Decision, error) {
+	rc.Metadata["secretscan.findings"] = []map[string]any{
+		{"pattern": "aws_access_key_id", "severity": "high", "role": "user", "message_index": 0},
+	}
+	return pipeline.Block, nil
+}
+
+func TestProxy_BlockBodyIncludesFindings(t *testing.T) {
+	srv, addr := newTestServer(t)
+	srv.cfg.Pipeline.Register(awsKeyBlockStage{})
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(srv.cfg.CA.RootCert())
+	proxyURL, _ := url.Parse("http://" + addr)
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "block.test"},
+		},
+		Timeout: 5 * time.Second,
+	}
+
+	resp, err := client.Get("https://block.test/")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", resp.StatusCode)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	var parsed struct {
+		Error    string                   `json:"error"`
+		Detector string                   `json:"detector"`
+		Findings []map[string]interface{} `json:"findings"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		t.Fatalf("body not JSON: %v, body=%s", err, string(body))
+	}
+	if parsed.Error == "" {
+		t.Errorf("missing error field; body=%s", string(body))
+	}
+	if len(parsed.Findings) != 1 {
+		t.Fatalf("expected 1 finding in body, got %d; body=%s", len(parsed.Findings), string(body))
+	}
+	if parsed.Findings[0]["pattern"] != "aws_access_key_id" {
+		t.Errorf("pattern = %v, want aws_access_key_id", parsed.Findings[0]["pattern"])
+	}
+	if strings.Contains(string(body), "AKIA") {
+		t.Errorf("403 body contains matched bytes: %s", string(body))
 	}
 }
