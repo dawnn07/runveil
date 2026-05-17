@@ -84,47 +84,56 @@ func (s *Stage) Process(ctx context.Context, rc *pipeline.RequestCtx) (pipeline.
 
 	parsed, err := parser.ParseRequest(rc.Host, rc.Req, body)
 	if err != nil {
-		s.log.Debug("secretscan parser error",
-			"host", rc.Host,
-			"err", err.Error())
+		s.log.Debug("secretscan parser error", "host", rc.Host, "err", err.Error())
 		return pipeline.Continue, nil
 	}
 	if parsed == nil {
 		return pipeline.Continue, nil
 	}
 
-	var enriched []EnrichedFinding
-	var highCount, medCount, lowCount int
-	var highPatterns []string
-
+	// Collect raw findings (one per detector.Scan hit per text segment).
+	var raw []EnrichedFinding
 	for _, seg := range parsed.Texts {
 		if !utf8.ValidString(seg.Content) {
 			continue
 		}
 		for _, f := range detector.Scan(seg.Content) {
-			enriched = append(enriched, EnrichedFinding{
+			raw = append(raw, EnrichedFinding{
 				Finding:      f,
 				Role:         seg.Role,
 				MessageIndex: seg.Index,
 			})
-			switch f.Severity {
-			case detector.SeverityHigh:
-				highCount++
-				highPatterns = append(highPatterns, f.Pattern)
-			case detector.SeverityMedium:
-				medCount++
-			case detector.SeverityLow:
-				lowCount++
-			}
 		}
 	}
 
-	if len(enriched) == 0 {
+	if len(raw) == 0 {
 		return pipeline.Continue, nil
 	}
 
-	rc.Metadata["secretscan.findings"] = enriched
+	if s.cfg.Policy != nil {
+		return s.decideWithPolicy(rc, parsed, raw)
+	}
+	return s.decideWithFlag(rc, parsed, raw)
+}
 
+// decideWithFlag implements the sub-project #2 semantics: WARN by default,
+// BLOCK on any High finding when cfg.BlockOnDetect is true.
+func (s *Stage) decideWithFlag(rc *pipeline.RequestCtx, parsed *parser.ParsedRequest, raw []EnrichedFinding) (pipeline.Decision, error) {
+	var highCount, medCount, lowCount int
+	var highPatterns []string
+	for _, f := range raw {
+		switch f.Finding.Severity {
+		case detector.SeverityHigh:
+			highCount++
+			highPatterns = append(highPatterns, f.Finding.Pattern)
+		case detector.SeverityMedium:
+			medCount++
+		case detector.SeverityLow:
+			lowCount++
+		}
+	}
+
+	rc.Metadata["secretscan.findings"] = raw
 	requestID, _ := rc.Metadata["request_id"].(string)
 
 	if highCount > 0 && s.cfg.BlockOnDetect {
@@ -147,4 +156,90 @@ func (s *Stage) Process(ctx context.Context, rc *pipeline.RequestCtx) (pipeline.
 		"medium", medCount,
 		"low", lowCount)
 	return pipeline.Continue, nil
+}
+
+// decideWithPolicy applies the configured Policy rule-by-rule, suppresses
+// allowed findings, blocks if any rule's action is Block, otherwise warns.
+func (s *Stage) decideWithPolicy(rc *pipeline.RequestCtx, parsed *parser.ParsedRequest, raw []EnrichedFinding) (pipeline.Decision, error) {
+	requestID, _ := rc.Metadata["request_id"].(string)
+
+	var kept []EnrichedFinding
+	var blockRules []string
+	var ruleNames []string
+	var blockPatterns []string
+	var highCount, medCount, lowCount int
+	anyBlock := false
+
+	for _, f := range raw {
+		action, rule := s.cfg.Policy.Decide(f.Finding)
+		ruleName := ""
+		if rule != nil {
+			ruleName = rule.Name
+		}
+
+		switch action {
+		case policy.ActionAllow:
+			s.log.Debug("policy allowed",
+				"request_id", requestID,
+				"pattern", f.Finding.Pattern,
+				"rule", ruleName)
+			// Suppressed: do not keep, do not count.
+		case policy.ActionBlock:
+			f.Rule = ruleName
+			kept = append(kept, f)
+			anyBlock = true
+			blockRules = append(blockRules, ruleName)
+			blockPatterns = append(blockPatterns, f.Finding.Pattern)
+			bumpCount(&highCount, &medCount, &lowCount, f.Finding.Severity)
+		case policy.ActionWarn:
+			fallthrough
+		default:
+			f.Rule = ruleName
+			kept = append(kept, f)
+			if ruleName != "" {
+				ruleNames = append(ruleNames, ruleName)
+			}
+			bumpCount(&highCount, &medCount, &lowCount, f.Finding.Severity)
+		}
+	}
+
+	if len(kept) == 0 {
+		return pipeline.Continue, nil
+	}
+
+	rc.Metadata["secretscan.findings"] = kept
+
+	if anyBlock {
+		s.log.Warn("secretscan blocked",
+			"request_id", requestID,
+			"vendor", parsed.Vendor,
+			"endpoint", parsed.Endpoint,
+			"high", highCount,
+			"medium", medCount,
+			"low", lowCount,
+			"block_rules", blockRules,
+			"patterns", blockPatterns)
+		return pipeline.Block, nil
+	}
+
+	s.log.Info("secretscan findings",
+		"request_id", requestID,
+		"vendor", parsed.Vendor,
+		"endpoint", parsed.Endpoint,
+		"high", highCount,
+		"medium", medCount,
+		"low", lowCount,
+		"rules_fired", ruleNames)
+	return pipeline.Continue, nil
+}
+
+func bumpCount(high, med, low *int, sev detector.Severity) {
+	switch sev {
+	case detector.SeverityHigh:
+		*high++
+	case detector.SeverityMedium:
+		*med++
+	case detector.SeverityLow:
+		*low++
+	}
 }

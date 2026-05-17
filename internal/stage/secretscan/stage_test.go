@@ -13,6 +13,7 @@ import (
 
 	"railcore/internal/detector"
 	"railcore/internal/pipeline"
+	"railcore/internal/policy"
 )
 
 func newRC(t *testing.T, host string, body string, method, path string) *pipeline.RequestCtx {
@@ -156,5 +157,156 @@ func TestEnrichedFinding_MarshalJSON_RuleOmittedWhenEmpty(t *testing.T) {
 	}
 	if strings.Contains(string(data), `"rule"`) {
 		t.Errorf("rule field should be omitted when empty; got %s", string(data))
+	}
+}
+
+func mkPolicy(t *testing.T, yamlText string) *policy.Policy {
+	t.Helper()
+	p, err := policy.LoadFromBytes([]byte(yamlText))
+	if err != nil {
+		t.Fatalf("policy.LoadFromBytes: %v", err)
+	}
+	return p
+}
+
+func TestSecretscan_PolicyBlockOnAWS(t *testing.T) {
+	pol := mkPolicy(t, `
+version: 1
+rules:
+  - name: block-aws
+    match: {pattern: aws_*}
+    action: block
+  - name: default
+    match: {all: true}
+    action: warn
+`)
+	s := New(Config{Policy: pol}, discardLogger())
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"key: AKIAIOSFODNN7EXAMPLE"}]}`
+	rc := newRC(t, "api.openai.com", body, http.MethodPost, "/v1/chat/completions")
+	dec, err := s.Process(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if dec != pipeline.Block {
+		t.Fatalf("decision = %v, want Block", dec)
+	}
+	findings, ok := rc.Metadata["secretscan.findings"].([]EnrichedFinding)
+	if !ok || len(findings) == 0 {
+		t.Fatalf("expected findings in metadata, got %v", rc.Metadata["secretscan.findings"])
+	}
+	if findings[0].Rule != "block-aws" {
+		t.Errorf("Rule = %q, want block-aws", findings[0].Rule)
+	}
+}
+
+func TestSecretscan_PolicyAllowSuppressesBlock(t *testing.T) {
+	pol := mkPolicy(t, `
+version: 1
+rules:
+  - name: allow-example
+    match: {pattern: aws_access_key_id}
+    action: allow
+  - name: block-aws
+    match: {pattern: aws_*}
+    action: block
+`)
+	s := New(Config{BlockOnDetect: true, Policy: pol}, discardLogger())
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"key: AKIAIOSFODNN7EXAMPLE"}]}`
+	rc := newRC(t, "api.openai.com", body, http.MethodPost, "/v1/chat/completions")
+	dec, err := s.Process(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if dec != pipeline.Continue {
+		t.Fatalf("decision = %v, want Continue (allow precedes block)", dec)
+	}
+	findings, _ := rc.Metadata["secretscan.findings"].([]EnrichedFinding)
+	for _, f := range findings {
+		if f.Finding.Pattern == "aws_access_key_id" {
+			t.Errorf("allowed finding leaked into metadata: %+v", f)
+		}
+	}
+}
+
+func TestSecretscan_PolicyWarnDoesNotBlock(t *testing.T) {
+	pol := mkPolicy(t, `
+version: 1
+rules:
+  - name: warn-all
+    match: {all: true}
+    action: warn
+`)
+	s := New(Config{Policy: pol}, discardLogger())
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"key: AKIAIOSFODNN7EXAMPLE"}]}`
+	rc := newRC(t, "api.openai.com", body, http.MethodPost, "/v1/chat/completions")
+	dec, err := s.Process(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if dec != pipeline.Continue {
+		t.Fatalf("decision = %v, want Continue (warn never blocks)", dec)
+	}
+	findings, ok := rc.Metadata["secretscan.findings"].([]EnrichedFinding)
+	if !ok || len(findings) == 0 {
+		t.Fatalf("expected findings, got %v", rc.Metadata["secretscan.findings"])
+	}
+	if findings[0].Rule != "warn-all" {
+		t.Errorf("Rule = %q, want warn-all", findings[0].Rule)
+	}
+}
+
+func TestSecretscan_PolicyMixedActions(t *testing.T) {
+	pol := mkPolicy(t, `
+version: 1
+rules:
+  - name: allow-aws
+    match: {pattern: aws_*}
+    action: allow
+  - name: block-github
+    match: {pattern: github_*}
+    action: block
+`)
+	s := New(Config{Policy: pol}, discardLogger())
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"AKIAIOSFODNN7EXAMPLE and ghp_abcdefghijklmnopqrstuvwxyz0123456789"}]}`
+	rc := newRC(t, "api.openai.com", body, http.MethodPost, "/v1/chat/completions")
+	dec, err := s.Process(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if dec != pipeline.Block {
+		t.Fatalf("decision = %v, want Block (github blocks even though aws allowed)", dec)
+	}
+	findings, _ := rc.Metadata["secretscan.findings"].([]EnrichedFinding)
+	sawGithub, sawAWS := false, false
+	for _, f := range findings {
+		if f.Finding.Pattern == "github_pat_classic" {
+			sawGithub = true
+			if f.Rule != "block-github" {
+				t.Errorf("github rule = %q, want block-github", f.Rule)
+			}
+		}
+		if f.Finding.Pattern == "aws_access_key_id" {
+			sawAWS = true
+		}
+	}
+	if !sawGithub {
+		t.Error("expected github finding in metadata")
+	}
+	if sawAWS {
+		t.Error("allowed aws finding should be absent from metadata")
+	}
+}
+
+func TestSecretscan_EmptyPolicyDefaultsToWarn(t *testing.T) {
+	pol := &policy.Policy{Version: 1}
+	s := New(Config{Policy: pol}, discardLogger())
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"key: AKIAIOSFODNN7EXAMPLE"}]}`
+	rc := newRC(t, "api.openai.com", body, http.MethodPost, "/v1/chat/completions")
+	dec, err := s.Process(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	if dec != pipeline.Continue {
+		t.Fatalf("decision = %v, want Continue (empty rules → warn default)", dec)
 	}
 }
