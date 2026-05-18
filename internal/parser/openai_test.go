@@ -1,0 +1,118 @@
+package parser
+
+import (
+	"encoding/json"
+	"testing"
+)
+
+func TestOpenAIChat_ExtractsToolCallArguments(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role": "user", "content": "fix the bug"},
+			{"role": "assistant", "tool_calls": [
+				{"id": "call_1", "type": "function",
+				 "function": {"name": "read_file",
+				              "arguments": "{\"path\":\"/src/payments/charge.go\"}"}}
+			]}
+		]
+	}`)
+	parsed, err := parseOpenAIChat(body)
+	if err != nil {
+		t.Fatalf("parseOpenAIChat: %v", err)
+	}
+	if len(parsed.Texts) != 1 || parsed.Texts[0].Content != "fix the bug" {
+		t.Fatalf("Texts = %+v; want [user='fix the bug']", parsed.Texts)
+	}
+	tus := ExtractToolUses("api.openai.com", "/v1/chat/completions", body)
+	if len(tus) != 1 {
+		t.Fatalf("ExtractToolUses len = %d, want 1", len(tus))
+	}
+	if tus[0].Tool != "read_file" {
+		t.Errorf("Tool = %q, want read_file", tus[0].Tool)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(tus[0].Input, &got); err != nil {
+		t.Fatalf("Input not valid JSON: %v; raw=%s", err, string(tus[0].Input))
+	}
+	if got["path"] != "/src/payments/charge.go" {
+		t.Errorf("Input.path = %v, want /src/payments/charge.go", got["path"])
+	}
+}
+
+func TestOpenAIChat_ToolCallMalformedArgumentsSkipped(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role": "assistant", "tool_calls": [
+				{"id": "x", "type": "function",
+				 "function": {"name": "read_file", "arguments": "not valid json"}}
+			]}
+		]
+	}`)
+	tus := ExtractToolUses("api.openai.com", "/v1/chat/completions", body)
+	if len(tus) != 1 {
+		t.Fatalf("len = %d, want 1 (we still emit the call with raw Input bytes)", len(tus))
+	}
+	if string(tus[0].Input) != "not valid json" {
+		t.Errorf("Input = %q, want raw bytes", string(tus[0].Input))
+	}
+}
+
+func TestOpenAIChat_ToolRoleMessageWithContentArray(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role": "tool", "tool_call_id": "x", "content": [
+				{"type": "text", "text": "file contents here"}
+			]}
+		]
+	}`)
+	parsed, err := parseOpenAIChat(body)
+	if err != nil {
+		t.Fatalf("parseOpenAIChat: %v", err)
+	}
+	if len(parsed.Texts) != 1 {
+		t.Fatalf("Texts len = %d, want 1", len(parsed.Texts))
+	}
+	if parsed.Texts[0].Role != "tool" || parsed.Texts[0].Content != "file contents here" {
+		t.Errorf("Texts[0] = %+v; want role=tool content='file contents here'", parsed.Texts[0])
+	}
+}
+
+func TestOpenAIChat_MultipleToolCallsInOneMessage(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role": "assistant", "tool_calls": [
+				{"id": "a", "type": "function",
+				 "function": {"name": "read_file", "arguments": "{\"path\":\"/a\"}"}},
+				{"id": "b", "type": "function",
+				 "function": {"name": "read_file", "arguments": "{\"path\":\"/b\"}"}}
+			]}
+		]
+	}`)
+	tus := ExtractToolUses("api.openai.com", "/v1/chat/completions", body)
+	if len(tus) != 2 {
+		t.Fatalf("len = %d, want 2", len(tus))
+	}
+}
+
+func TestOpenAIChat_MixedTextAndToolCalls(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role": "assistant", "content": "thinking…",
+			 "tool_calls": [
+				{"id": "x", "type": "function",
+				 "function": {"name": "read_file", "arguments": "{\"path\":\"/x\"}"}}
+			]}
+		]
+	}`)
+	parsed, err := parseOpenAIChat(body)
+	if err != nil {
+		t.Fatalf("parseOpenAIChat: %v", err)
+	}
+	if len(parsed.Texts) != 1 || parsed.Texts[0].Content != "thinking…" {
+		t.Fatalf("Texts = %+v; want one segment 'thinking…'", parsed.Texts)
+	}
+	tus := ExtractToolUses("api.openai.com", "/v1/chat/completions", body)
+	if len(tus) != 1 {
+		t.Fatalf("ExtractToolUses len = %d, want 1", len(tus))
+	}
+}

@@ -42,7 +42,7 @@ func ExtractPathEvents(parsed *parser.ParsedRequest, body []byte) []PathEvent {
 	if parsed == nil || parsed.Vendor != "anthropic" {
 		return nil
 	}
-	tools := parser.ExtractToolUses("api.anthropic.com", body)
+	tools := parser.ExtractToolUses("api.anthropic.com", "/v1/messages", body)
 	if len(tools) == 0 {
 		return nil
 	}

@@ -133,13 +133,29 @@ type ToolUse struct {
 	MessageIndex int             // position of the originating message in messages[]
 }
 
-// ExtractToolUses parses an Anthropic messages body and returns every
-// tool_use content block. Returns nil for non-Anthropic hosts or for
-// bodies that fail to parse. Silently skips malformed individual blocks.
-func ExtractToolUses(host string, body []byte) []ToolUse {
-	if host != "api.anthropic.com" {
-		return nil
+// ExtractToolUses dispatches to vendor-specific extractors based on
+// host + path. Returns nil for unknown hosts/paths.
+func ExtractToolUses(host, path string, body []byte) []ToolUse {
+	switch host {
+	case "api.anthropic.com":
+		if path != "/v1/messages" {
+			return nil
+		}
+		return extractAnthropicToolUses(body)
+	case "api.openai.com":
+		switch path {
+		case "/v1/chat/completions":
+			return extractOpenAIChatToolUses(body)
+		case "/v1/responses":
+			return extractOpenAIResponsesToolUses(body)
+		}
 	}
+	return nil
+}
+
+// extractAnthropicToolUses returns the tool_use content blocks from an
+// Anthropic /v1/messages request body. Silently skips malformed blocks.
+func extractAnthropicToolUses(body []byte) []ToolUse {
 	var req anthropicMessagesRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		return nil

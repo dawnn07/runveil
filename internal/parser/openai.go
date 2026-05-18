@@ -10,8 +10,20 @@ type openAIChatRequest struct {
 }
 
 type openAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role      string           `json:"role"`
+	Content   json.RawMessage  `json:"content"`
+	ToolCalls []openAIToolCall `json:"tool_calls"`
+}
+
+type openAIToolCall struct {
+	ID       string             `json:"id"`
+	Type     string             `json:"type"`
+	Function openAIFunctionCall `json:"function"`
+}
+
+type openAIFunctionCall struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 func parseOpenAIChat(body []byte) (*ParsedRequest, error) {
@@ -23,16 +35,18 @@ func parseOpenAIChat(body []byte) (*ParsedRequest, error) {
 		return nil, fmt.Errorf("openai chat: missing messages field")
 	}
 
-	texts := make([]TextSegment, 0, len(req.Messages))
+	var texts []TextSegment
 	for i, m := range req.Messages {
-		if m.Content == "" {
-			continue
+		for _, seg := range flattenOpenAIContent(m.Content) {
+			if seg == "" {
+				continue
+			}
+			texts = append(texts, TextSegment{
+				Role:    m.Role,
+				Index:   i,
+				Content: seg,
+			})
 		}
-		texts = append(texts, TextSegment{
-			Role:    m.Role,
-			Index:   i,
-			Content: m.Content,
-		})
 	}
 
 	return &ParsedRequest{
@@ -41,4 +55,75 @@ func parseOpenAIChat(body []byte) (*ParsedRequest, error) {
 		Texts:    texts,
 		Raw:      body,
 	}, nil
+}
+
+// flattenOpenAIContent accepts a raw JSON value that may be:
+//   - empty/null (returns nil)
+//   - a JSON string (returns [string])
+//   - a JSON array of typed parts; emits .text for parts where type is
+//     "text", "input_text", or "output_text". Unknown part types are
+//     skipped.
+//
+// Anything else returns nil.
+func flattenOpenAIContent(raw json.RawMessage) []string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		return []string{asString}
+	}
+
+	var parts []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return nil
+	}
+
+	var out []string
+	for _, p := range parts {
+		typeRaw, hasType := p["type"]
+		if !hasType {
+			continue
+		}
+		var t string
+		if err := json.Unmarshal(typeRaw, &t); err != nil {
+			continue
+		}
+		switch t {
+		case "text", "input_text", "output_text":
+			if textRaw, ok := p["text"]; ok {
+				var s string
+				if err := json.Unmarshal(textRaw, &s); err == nil && s != "" {
+					out = append(out, s)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// extractOpenAIChatToolUses walks messages[].tool_calls and returns one
+// ToolUse per type=="function" entry. Arguments is OpenAI's wire format:
+// a JSON-encoded string whose decoded value is an object. We store that
+// decoded string as raw JSON bytes in ToolUse.Input.
+func extractOpenAIChatToolUses(body []byte) []ToolUse {
+	var req openAIChatRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil
+	}
+	var out []ToolUse
+	for i, m := range req.Messages {
+		for _, tc := range m.ToolCalls {
+			if tc.Type != "function" || tc.Function.Name == "" {
+				continue
+			}
+			out = append(out, ToolUse{
+				Tool:         tc.Function.Name,
+				Input:        json.RawMessage(tc.Function.Arguments),
+				MessageIndex: i,
+			})
+		}
+	}
+	return out
 }

@@ -264,7 +264,7 @@ func TestExtractToolUses_AnthropicSingleRead(t *testing.T) {
 			]}
 		]
 	}`)
-	got := ExtractToolUses("api.anthropic.com", body)
+	got := ExtractToolUses("api.anthropic.com", "/v1/messages", body)
 	if len(got) != 1 {
 		t.Fatalf("got %d tool_uses, want 1; got %+v", len(got), got)
 	}
@@ -293,7 +293,7 @@ func TestExtractToolUses_NoToolUses(t *testing.T) {
 			{"role": "user", "content": "hello"}
 		]
 	}`)
-	got := ExtractToolUses("api.anthropic.com", body)
+	got := ExtractToolUses("api.anthropic.com", "/v1/messages", body)
 	if len(got) != 0 {
 		t.Errorf("expected 0 tool_uses, got %d", len(got))
 	}
@@ -301,14 +301,14 @@ func TestExtractToolUses_NoToolUses(t *testing.T) {
 
 func TestExtractToolUses_NonAnthropicHost(t *testing.T) {
 	body := []byte(`{"messages": [{"role": "user", "content": "x"}]}`)
-	got := ExtractToolUses("api.openai.com", body)
+	got := ExtractToolUses("api.openai.com", "", body)
 	if got != nil {
 		t.Errorf("expected nil for non-Anthropic host, got %+v", got)
 	}
 }
 
 func TestExtractToolUses_MalformedJSON(t *testing.T) {
-	got := ExtractToolUses("api.anthropic.com", []byte(`{not json`))
+	got := ExtractToolUses("api.anthropic.com", "/v1/messages", []byte(`{not json`))
 	if got != nil {
 		t.Errorf("expected nil for malformed JSON, got %+v", got)
 	}
@@ -328,7 +328,7 @@ func TestExtractToolUses_MultipleBlocksAcrossMessages(t *testing.T) {
 			]}
 		]
 	}`)
-	got := ExtractToolUses("api.anthropic.com", body)
+	got := ExtractToolUses("api.anthropic.com", "/v1/messages", body)
 	if len(got) != 2 {
 		t.Fatalf("got %d, want 2; %+v", len(got), got)
 	}
