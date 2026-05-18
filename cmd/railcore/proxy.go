@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"railcore/internal/audit"
 	"railcore/internal/ca"
 	"railcore/internal/pipeline"
 	"railcore/internal/policy"
@@ -27,6 +28,11 @@ func runProxy(args []string) {
 	dataDir := fs.String("data-dir", defaultDataDir(), "directory for CA + state")
 	blockOnDetect := fs.Bool("block-on-detect", false, "return 403 on High-severity secret findings (default WARN only). Ignored when a policy file is in effect.")
 	policyPath := fs.String("policy", "", "path to a YAML policy file (default: <data-dir>/policy.yaml if it exists)")
+	auditEnabled := fs.Bool("audit-enabled", true, "write per-request audit records to a JSON Lines log file")
+	auditLog := fs.String("audit-log", "", "path to audit log file (default: <data-dir>/audit.log)")
+	auditMaxSizeMB := fs.Int("audit-max-size-mb", 100, "max audit file size before rotation")
+	auditMaxBackups := fs.Int("audit-max-backups", 5, "rotated audit files to retain")
+	auditMaxAgeDays := fs.Int("audit-max-age-days", 30, "max age in days for rotated audit files")
 	_ = fs.Parse(args)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -42,6 +48,30 @@ func runProxy(args []string) {
 		logger.Warn("trust-store auto-install did not complete",
 			"err", err.Error(),
 			"manual_steps", trust.ManualInstructions(caInst.RootPath()))
+	}
+
+	// Resolve audit log path.
+	auditPath := *auditLog
+	if auditPath == "" {
+		auditPath = filepath.Join(*dataDir, "audit.log")
+	}
+
+	var auditLogger audit.Logger = audit.NoopLogger{}
+	var auditWriter *audit.Writer
+	if *auditEnabled {
+		w, err := audit.NewWriter(audit.Config{
+			Path:       auditPath,
+			MaxSizeMB:  *auditMaxSizeMB,
+			MaxBackups: *auditMaxBackups,
+			MaxAgeDays: *auditMaxAgeDays,
+		}, logger)
+		if err != nil {
+			logger.Error("audit init failed", "err", err.Error())
+			os.Exit(1)
+		}
+		auditWriter = w
+		auditLogger = w
+		defer func() { _ = auditWriter.Close() }()
 	}
 
 	loadedPolicy, policyMode, resolvedPath := resolvePolicy(*policyPath, *dataDir, logger)
@@ -61,10 +91,11 @@ func runProxy(args []string) {
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 	srv := proxy.New(proxy.Config{
-		Addr:     addr,
-		CA:       caInst,
-		Pipeline: chain,
-		Logger:   logger,
+		Addr:      addr,
+		CA:        caInst,
+		Pipeline:  chain,
+		Logger:    logger,
+		AuditFunc: auditLogger,
 	})
 
 	ln, err := net.Listen("tcp", addr)
