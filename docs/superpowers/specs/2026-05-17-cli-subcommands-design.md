@@ -388,3 +388,16 @@ Sub-project #5 is complete when:
 4. The design doc and implementation are committed to the repo.
 
 When these four hold, sub-project #6 (audit logging) can add a `railcore logs` subcommand following the same per-file convention without restructuring `cmd/railcore/`.
+
+---
+
+## 11. Acceptance Result
+
+**Date:** 2026-05-17
+
+- `railcore init` on a fresh machine generated CA + attempted trust install + wrote annotated starter policy.
+- `railcore status` reported CA + policy + proxy state correctly before and after starting the proxy.
+- `railcore test-policy ~/.railcore/policy.yaml` reported `ok (1 rules)`.
+- `railcore version` printed `railcore 0.1.0`.
+
+**Status:** Pass. Sub-project #5 done definition §7 satisfied.
