@@ -36,8 +36,11 @@ func ParseRequest(host string, req *http.Request, body []byte) (*ParsedRequest, 
 	}
 	switch host {
 	case "api.openai.com":
-		if req.URL.Path == "/v1/chat/completions" {
+		switch req.URL.Path {
+		case "/v1/chat/completions":
 			return parseOpenAIChat(body)
+		case "/v1/responses":
+			return parseOpenAIResponses(body)
 		}
 	case "api.anthropic.com":
 		if req.URL.Path == "/v1/messages" {

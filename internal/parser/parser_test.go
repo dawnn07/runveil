@@ -339,3 +339,52 @@ func TestExtractToolUses_MultipleBlocksAcrossMessages(t *testing.T) {
 		t.Errorf("[1] = %+v", got[1])
 	}
 }
+
+func TestParseRequest_OpenAIResponsesEndpoint(t *testing.T) {
+	body := []byte(`{"model":"gpt-4.1","input":"hi"}`)
+	req := httptest.NewRequest("POST", "/v1/responses", nil)
+	parsed, err := ParseRequest("api.openai.com", req, body)
+	if err != nil {
+		t.Fatalf("ParseRequest: %v", err)
+	}
+	if parsed == nil {
+		t.Fatal("parsed is nil")
+	}
+	if parsed.Vendor != "openai" || parsed.Endpoint != "responses" {
+		t.Errorf("Vendor/Endpoint = %q/%q", parsed.Vendor, parsed.Endpoint)
+	}
+}
+
+func TestExtractToolUses_OpenAIResponses(t *testing.T) {
+	body := []byte(`{
+		"input": [
+			{"type": "function_call", "name": "read_file",
+			 "arguments": "{\"path\":\"/x\"}"}
+		]
+	}`)
+	tus := ExtractToolUses("api.openai.com", "/v1/responses", body)
+	if len(tus) != 1 || tus[0].Tool != "read_file" {
+		t.Errorf("got %+v, want one Tool=read_file", tus)
+	}
+}
+
+func TestExtractToolUses_AnthropicSignatureStillWorks(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role": "assistant", "content": [
+				{"type": "tool_use", "name": "Read", "id": "x",
+				 "input": {"file_path": "/a"}}
+			]}
+		]
+	}`)
+	tus := ExtractToolUses("api.anthropic.com", "/v1/messages", body)
+	if len(tus) != 1 || tus[0].Tool != "Read" {
+		t.Errorf("got %+v, want one Tool=Read", tus)
+	}
+}
+
+func TestExtractToolUses_UnknownHostReturnsNil(t *testing.T) {
+	if tus := ExtractToolUses("example.com", "/", nil); tus != nil {
+		t.Errorf("got %+v, want nil", tus)
+	}
+}
