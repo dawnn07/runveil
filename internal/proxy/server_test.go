@@ -20,6 +20,7 @@ import (
 
 	"go.uber.org/goleak"
 
+	"railcore/internal/audit"
 	"railcore/internal/ca"
 	"railcore/internal/pipeline"
 )
@@ -653,4 +654,166 @@ func TestProxy_PathBlockTakesPrecedence(t *testing.T) {
 	}
 	// If we reached here, panicIfCalledStage was never invoked — the
 	// pipeline halted at the first Block decision. Success.
+}
+
+// captureAudit records every audit.Record passed to Log.
+type captureAudit struct {
+	mu      sync.Mutex
+	records []audit.Record
+}
+
+func (c *captureAudit) Log(r audit.Record) {
+	c.mu.Lock()
+	c.records = append(c.records, r)
+	c.mu.Unlock()
+}
+
+func (c *captureAudit) get() []audit.Record {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]audit.Record, len(c.records))
+	copy(out, c.records)
+	return out
+}
+
+func TestProxy_AuditFuncInvokedOnContinue(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	t.Cleanup(upstream.Close)
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+	upstreamPool := x509.NewCertPool()
+	upstreamPool.AddCert(upstream.Certificate())
+
+	srv, addr := newTestServer(t)
+	srv.cfg.UpstreamTLS = &tls.Config{RootCAs: upstreamPool, ServerName: upstreamURL.Hostname()}
+	srv.cfg.UpstreamResolver = func(_ string) (string, error) { return upstreamURL.Host, nil }
+
+	cap := &captureAudit{}
+	srv.cfg.AuditFunc = cap
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(srv.cfg.CA.RootCert())
+	proxyURL, _ := url.Parse("http://" + addr)
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "audit.test"},
+		},
+		Timeout: 5 * time.Second,
+	}
+	resp, err := client.Get("https://audit.test/some/path")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	resp.Body.Close()
+
+	time.Sleep(50 * time.Millisecond)
+
+	recs := cap.get()
+	if len(recs) != 1 {
+		t.Fatalf("got %d audit records, want 1", len(recs))
+	}
+	r := recs[0]
+	if r.Decision != "continue" {
+		t.Errorf("Decision = %q, want continue", r.Decision)
+	}
+	if r.Host != "audit.test" {
+		t.Errorf("Host = %q, want audit.test", r.Host)
+	}
+	if r.Method != "GET" {
+		t.Errorf("Method = %q, want GET", r.Method)
+	}
+	if r.Status != 200 {
+		t.Errorf("Status = %d, want 200", r.Status)
+	}
+	if r.RequestID == "" {
+		t.Error("RequestID is empty")
+	}
+}
+
+func TestProxy_AuditFuncNilIsSafe(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	t.Cleanup(upstream.Close)
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+	upstreamPool := x509.NewCertPool()
+	upstreamPool.AddCert(upstream.Certificate())
+
+	srv, addr := newTestServer(t)
+	srv.cfg.UpstreamTLS = &tls.Config{RootCAs: upstreamPool, ServerName: upstreamURL.Hostname()}
+	srv.cfg.UpstreamResolver = func(_ string) (string, error) { return upstreamURL.Host, nil }
+	// AuditFunc deliberately left nil.
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(srv.cfg.CA.RootCert())
+	proxyURL, _ := url.Parse("http://" + addr)
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "nil-audit.test"},
+		},
+		Timeout: 5 * time.Second,
+	}
+	resp, err := client.Get("https://nil-audit.test/")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	resp.Body.Close()
+	// Survived without panic = test passes.
+}
+
+func TestProxy_AuditRecordIncludesAnthropicVendor(t *testing.T) {
+	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, `{"ok":true}`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	upstreamURL, _ := url.Parse(upstream.URL)
+	upstreamPool := x509.NewCertPool()
+	upstreamPool.AddCert(upstream.Certificate())
+
+	srv, addr := newTestServer(t)
+	srv.cfg.UpstreamTLS = &tls.Config{RootCAs: upstreamPool, ServerName: upstreamURL.Hostname()}
+	srv.cfg.UpstreamResolver = func(_ string) (string, error) { return upstreamURL.Host, nil }
+
+	cap := &captureAudit{}
+	srv.cfg.AuditFunc = cap
+
+	caPool := x509.NewCertPool()
+	caPool.AddCert(srv.cfg.CA.RootCert())
+	proxyURL, _ := url.Parse("http://" + addr)
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy:           http.ProxyURL(proxyURL),
+			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "api.anthropic.com"},
+		},
+		Timeout: 5 * time.Second,
+	}
+	body := `{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hi"}]}`
+	resp, err := client.Post("https://api.anthropic.com/v1/messages", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	resp.Body.Close()
+
+	time.Sleep(50 * time.Millisecond)
+
+	recs := cap.get()
+	if len(recs) != 1 {
+		t.Fatalf("got %d audit records, want 1", len(recs))
+	}
+	r := recs[0]
+	if r.Vendor != "anthropic" {
+		t.Errorf("Vendor = %q, want anthropic", r.Vendor)
+	}
+	if r.Endpoint != "messages" {
+		t.Errorf("Endpoint = %q, want messages", r.Endpoint)
+	}
+	if r.BytesIn != int64(len(body)) {
+		t.Errorf("BytesIn = %d, want %d", r.BytesIn, len(body))
+	}
 }

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"railcore/internal/audit"
+	"railcore/internal/parser"
 	"railcore/internal/pipeline"
 )
 
@@ -44,6 +46,7 @@ func (s *Server) newHandler(host, requestID string) http.Handler {
 		start := time.Now()
 		decision := pipeline.Continue
 		var bytesIn int64
+		var rc *pipeline.RequestCtx
 
 		defer func() {
 			s.log.Info("request complete",
@@ -57,6 +60,24 @@ func (s *Server) newHandler(host, requestID string) http.Handler {
 				"duration_ms", time.Since(start).Milliseconds(),
 				"decision", decision.String(),
 			)
+			if s.cfg.AuditFunc != nil {
+				vendor, endpoint := vendorAndEndpoint(rc)
+				s.cfg.AuditFunc.Log(audit.Record{
+					Time:       start,
+					RequestID:  requestID,
+					Host:       host,
+					Method:     r.Method,
+					Path:       r.URL.Path,
+					Status:     rec.status,
+					BytesIn:    bytesIn,
+					BytesOut:   rec.bytesOut,
+					DurationMs: time.Since(start).Milliseconds(),
+					Vendor:     vendor,
+					Endpoint:   endpoint,
+					Decision:   decision.String(),
+					Findings:   findingsFromMetadata(rc),
+				})
+			}
 		}()
 
 		// Enforce body cap. MaxBytesReader returns an error on Read once the
@@ -78,7 +99,7 @@ func (s *Server) newHandler(host, requestID string) http.Handler {
 		r.Body = io.NopCloser(newByteReader(body))
 		r.ContentLength = int64(len(body))
 
-		rc := &pipeline.RequestCtx{
+		rc = &pipeline.RequestCtx{
 			Req:       r,
 			Host:      host,
 			Metadata:  map[string]any{"request_id": requestID, "body": body},
@@ -228,6 +249,46 @@ func flattenFindings(in []any) []any {
 		}
 	}
 	return out
+}
+
+// vendorAndEndpoint inspects the parsed request via the parser package
+// to extract the vendor name and endpoint identifier. Returns ("","")
+// if rc is nil, the body isn't stored, or the request isn't a known AI
+// endpoint.
+func vendorAndEndpoint(rc *pipeline.RequestCtx) (vendor, endpoint string) {
+	if rc == nil {
+		return "", ""
+	}
+	body, ok := rc.Metadata["body"].([]byte)
+	if !ok {
+		return "", ""
+	}
+	parsed, err := parser.ParseRequest(rc.Host, rc.Req, body)
+	if err != nil || parsed == nil {
+		return "", ""
+	}
+	return parsed.Vendor, parsed.Endpoint
+}
+
+// findingsFromMetadata collects findings from both secretscan and
+// pathscan stages' metadata keys into a flat []any (delegating the
+// typed-slice flattening to the existing flattenFindings helper).
+// Returns nil if neither key is present.
+func findingsFromMetadata(rc *pipeline.RequestCtx) []any {
+	if rc == nil {
+		return nil
+	}
+	var raw []any
+	if v, ok := rc.Metadata["pathscan.findings"]; ok {
+		raw = append(raw, v)
+	}
+	if v, ok := rc.Metadata["secretscan.findings"]; ok {
+		raw = append(raw, v)
+	}
+	if len(raw) == 0 {
+		return nil
+	}
+	return flattenFindings(raw)
 }
 
 // byteReader is an io.Reader over a fixed []byte. Used to re-create a

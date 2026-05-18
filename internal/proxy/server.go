@@ -17,6 +17,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"railcore/internal/audit"
 	"railcore/internal/ca"
 	"railcore/internal/pipeline"
 )
@@ -37,6 +38,10 @@ type Config struct {
 	// to the actual upstream host:port to dial. Used in tests to point the
 	// proxy at httptest servers. nil means dial host:443 directly.
 	UpstreamResolver func(host string) (string, error)
+
+	// AuditFunc, if non-nil, receives one audit.Record per completed
+	// request. Nil is safe — no audit emission.
+	AuditFunc audit.Logger
 }
 
 // Server is the Railcore forward HTTPS proxy.
