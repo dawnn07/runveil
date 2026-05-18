@@ -18,19 +18,22 @@ func mustParse(t *testing.T, host, body string) *parser.ParsedRequest {
 	return parsed
 }
 
-func TestExtractPathEvents_NonAnthropicReturnsNil(t *testing.T) {
-	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"hello"}]}`
-	parsed := mustParse(t, "api.openai.com", body)
-	got := ExtractPathEvents(parsed, []byte(body))
+func TestExtractPathEvents_UnknownVendorReturnsNil(t *testing.T) {
+	body := `{"messages":[{"role":"user","content":"hello"}]}`
+	parsed := &parser.ParsedRequest{
+		Vendor: "some-future-vendor",
+		Raw:    []byte(body),
+	}
+	got := ExtractPathEvents(parsed, []byte(body), "/v1/messages")
 	if got != nil {
-		t.Errorf("expected nil for non-Anthropic, got %+v", got)
+		t.Errorf("expected nil for unknown vendor, got %+v", got)
 	}
 }
 
 func TestExtractPathEvents_NoToolUseReturnsEmpty(t *testing.T) {
 	body := `{"model":"claude-opus-4-7","messages":[{"role":"user","content":"hello"}]}`
 	parsed := mustParse(t, "api.anthropic.com", body)
-	got := ExtractPathEvents(parsed, []byte(body))
+	got := ExtractPathEvents(parsed, []byte(body), "/v1/messages")
 	if len(got) != 0 {
 		t.Errorf("expected empty for no tool_use, got %+v", got)
 	}
@@ -45,7 +48,7 @@ func TestExtractPathEvents_ReadTool(t *testing.T) {
 		]
 	}`
 	parsed := mustParse(t, "api.anthropic.com", body)
-	got := ExtractPathEvents(parsed, []byte(body))
+	got := ExtractPathEvents(parsed, []byte(body), "/v1/messages")
 	if len(got) != 1 {
 		t.Fatalf("got %d, want 1: %+v", len(got), got)
 	}
@@ -66,7 +69,7 @@ func TestExtractPathEvents_AllFourTools(t *testing.T) {
 		]
 	}`
 	parsed := mustParse(t, "api.anthropic.com", body)
-	got := ExtractPathEvents(parsed, []byte(body))
+	got := ExtractPathEvents(parsed, []byte(body), "/v1/messages")
 	if len(got) != 4 {
 		t.Fatalf("expected 4 events, got %d: %+v", len(got), got)
 	}
@@ -92,7 +95,7 @@ func TestExtractPathEvents_IgnoresOtherTools(t *testing.T) {
 		]
 	}`
 	parsed := mustParse(t, "api.anthropic.com", body)
-	got := ExtractPathEvents(parsed, []byte(body))
+	got := ExtractPathEvents(parsed, []byte(body), "/v1/messages")
 	if len(got) != 0 {
 		t.Errorf("expected 0 events (unsupported tools), got %+v", got)
 	}
@@ -109,7 +112,7 @@ func TestExtractPathEvents_MissingFilePathSkipped(t *testing.T) {
 		]
 	}`
 	parsed := mustParse(t, "api.anthropic.com", body)
-	got := ExtractPathEvents(parsed, []byte(body))
+	got := ExtractPathEvents(parsed, []byte(body), "/v1/messages")
 	if len(got) != 1 || got[0].Path != "/ok" {
 		t.Errorf("got %+v, want one event with path=/ok", got)
 	}
@@ -131,7 +134,7 @@ func TestExtractPathEvents_MessageIndexPreserved(t *testing.T) {
 		]
 	}`
 	parsed := mustParse(t, "api.anthropic.com", body)
-	got := ExtractPathEvents(parsed, []byte(body))
+	got := ExtractPathEvents(parsed, []byte(body), "/v1/messages")
 	if len(got) != 2 {
 		t.Fatalf("got %d, want 2: %+v", len(got), got)
 	}
@@ -140,5 +143,84 @@ func TestExtractPathEvents_MessageIndexPreserved(t *testing.T) {
 	}
 	if got[1].MessageIndex != 3 {
 		t.Errorf("[1].MessageIndex = %d, want 3", got[1].MessageIndex)
+	}
+}
+
+func TestExtractPathEvents_OpenAIChatToolCalls(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role": "assistant", "tool_calls": [
+				{"id": "x", "type": "function",
+				 "function": {"name": "read_file",
+				              "arguments": "{\"path\":\"/src/payments/x.go\"}"}}
+			]}
+		]
+	}`)
+	parsed := &parser.ParsedRequest{
+		Vendor:   "openai",
+		Endpoint: "chat.completions",
+		Raw:      body,
+	}
+	events := ExtractPathEvents(parsed, body, "/v1/chat/completions")
+	if len(events) != 1 {
+		t.Fatalf("events len = %d, want 1", len(events))
+	}
+	if events[0].Path != "/src/payments/x.go" {
+		t.Errorf("Path = %q, want /src/payments/x.go", events[0].Path)
+	}
+	if events[0].Tool != "read_file" {
+		t.Errorf("Tool = %q, want read_file", events[0].Tool)
+	}
+}
+
+func TestExtractPathEvents_OpenAIResponsesFunctionCall(t *testing.T) {
+	body := []byte(`{
+		"input": [
+			{"type": "function_call", "name": "read_file",
+			 "arguments": "{\"file_path\":\"/etc/passwd\"}"}
+		]
+	}`)
+	parsed := &parser.ParsedRequest{
+		Vendor:   "openai",
+		Endpoint: "responses",
+		Raw:      body,
+	}
+	events := ExtractPathEvents(parsed, body, "/v1/responses")
+	if len(events) != 1 || events[0].Path != "/etc/passwd" {
+		t.Errorf("events = %+v, want one path=/etc/passwd", events)
+	}
+}
+
+func TestExtractPathEvents_OpenAIFilenameField(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role": "assistant", "tool_calls": [
+				{"id": "x", "type": "function",
+				 "function": {"name": "write_file",
+				              "arguments": "{\"filename\":\"/tmp/o\",\"content\":\"x\"}"}}
+			]}
+		]
+	}`)
+	parsed := &parser.ParsedRequest{Vendor: "openai", Endpoint: "chat.completions", Raw: body}
+	events := ExtractPathEvents(parsed, body, "/v1/chat/completions")
+	if len(events) != 1 || events[0].Path != "/tmp/o" {
+		t.Errorf("events = %+v, want one path=/tmp/o", events)
+	}
+}
+
+func TestExtractPathEvents_OpenAIUnknownToolSkipped(t *testing.T) {
+	body := []byte(`{
+		"messages": [
+			{"role": "assistant", "tool_calls": [
+				{"id": "x", "type": "function",
+				 "function": {"name": "unknown_tool",
+				              "arguments": "{\"path\":\"/a\"}"}}
+			]}
+		]
+	}`)
+	parsed := &parser.ParsedRequest{Vendor: "openai", Endpoint: "chat.completions", Raw: body}
+	events := ExtractPathEvents(parsed, body, "/v1/chat/completions")
+	if len(events) != 0 {
+		t.Errorf("events = %+v, want empty (unknown tool)", events)
 	}
 }

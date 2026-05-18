@@ -84,7 +84,7 @@ func (s *Stage) Process(ctx context.Context, rc *pipeline.RequestCtx) (pipeline.
 		return pipeline.Continue, nil
 	}
 
-	events := pathscan.ExtractPathEvents(parsed, body)
+	events := pathscan.ExtractPathEvents(parsed, body, rc.Req.URL.Path)
 	if len(events) == 0 {
 		return pipeline.Continue, nil
 	}
