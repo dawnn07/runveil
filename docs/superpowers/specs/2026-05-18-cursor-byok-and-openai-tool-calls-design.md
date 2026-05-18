@@ -36,13 +36,17 @@ This is the seventh and final MVP sub-project. After this, the proxy supports tw
 
 ```
 internal/parser/                  (leaf package; stdlib + net/http only)
-├── parser.go                     MODIFY: dispatch /v1/responses
-├── openai.go                     MODIFY: tool_calls + content arrays
-├── openai_responses.go           CREATE: /v1/responses parser
-├── anthropic.go                  unchanged
+├── parser.go                     MODIFY: dispatch /v1/responses + widen ExtractToolUses signature
+├── openai.go                     MODIFY: tool_calls + content arrays + ExtractToolUses path
+├── openai_responses.go           CREATE: /v1/responses parser + function_call extraction
+├── anthropic.go                  MODIFY: ExtractToolUses signature only (logic unchanged)
 ├── openai_test.go                MODIFY: append 5 tests
 ├── openai_responses_test.go      CREATE
-└── parser_test.go                unchanged (dispatcher already covered)
+└── parser_test.go                MODIFY: append dispatcher tests for /v1/responses
+
+internal/pathscan/
+├── pathscan.go                   MODIFY: vendor gate + field-name candidates + tool allowlist
+└── pathscan_test.go              MODIFY: append OpenAI-shaped fixture tests
 ```
 
 ```
@@ -98,26 +102,30 @@ type openAIFunctionCall struct {
    - Else → skip silently.
 2. `tool_calls` are NOT added to `Texts`. They are surfaced via `ExtractToolUses` only — path-scan walks them; secret-scan does not need them (the file path is the signal).
 
-**`ExtractToolUses` for `host=="api.openai.com"`, path `/v1/chat/completions`:**
-
-```go
-// For each msg in messages:
-//   For each tc in msg.tool_calls where tc.Type=="function":
-//     in := map[string]any{}
-//     json.Unmarshal([]byte(tc.Function.Arguments), &in)   // ignore err; in stays {}
-//     out = append(out, ToolUse{Name: tc.Function.Name, Input: in})
-```
-
-Existing `ToolUse` struct:
+**Existing `ToolUse` struct (unchanged):**
 
 ```go
 type ToolUse struct {
-    Name  string         // e.g. "read_file"
-    Input map[string]any
+    Tool         string          // e.g. "read_file"
+    Input        json.RawMessage // raw bytes of arguments object
+    MessageIndex int
 }
 ```
 
-— unchanged. The path-scan stage already walks `Input` recursively for file-path-shaped strings.
+**`ExtractToolUses` widening:** Today the function dispatches on `host` only and short-circuits to `nil` for non-Anthropic hosts. Widen the signature to `ExtractToolUses(host, path string, body []byte) []ToolUse`. For `host=="api.openai.com"` and `path=="/v1/chat/completions"`:
+
+```go
+// For each msg in messages, for each tc in msg.tool_calls where tc.Type=="function":
+//   out = append(out, ToolUse{
+//       Tool:         tc.Function.Name,
+//       Input:        []byte(tc.Function.Arguments),  // arguments is a JSON-encoded string
+//       MessageIndex: i,
+//   })
+```
+
+`tc.Function.Arguments` is OpenAI's wire format: a JSON-encoded string whose value is a JSON object. Once the outer JSON Unmarshal into `Arguments string` runs, the string field holds raw JSON bytes (e.g., `{"path":"x"}`). Casting to `[]byte` gives valid JSON that downstream consumers can `json.Unmarshal` into a typed struct.
+
+All existing callers (one — `internal/pathscan/pathscan.go`) update to pass `path` alongside `host`.
 
 ### 4.2 OpenAI `/v1/responses` — new `openai_responses.go`
 
@@ -182,8 +190,12 @@ case "api.openai.com":
 ### 4.4 Audit / policy / scanner impact
 
 - **Audit:** `endpoint` becomes `"responses"` when Cursor hits the new endpoint. Open-string field, no schema migration.
-- **Policy engine:** unchanged. Rules match on path strings inside ToolUse Input — the source endpoint is opaque.
-- **Pathscan stage:** unchanged. Already walks `ToolUse.Input` recursively.
+- **Policy engine:** unchanged. Rules match on path strings extracted from ToolUse Input — the source endpoint is opaque.
+- **Pathscan stage (`internal/pathscan/pathscan.go`):** requires three small changes:
+  1. Drop the `parsed.Vendor != "anthropic"` short-circuit so OpenAI ParsedRequests are also processed.
+  2. Pass `path` through to `parser.ExtractToolUses` (widened signature).
+  3. Try multiple field names when decoding `tu.Input`: `file_path` (Anthropic convention, kept first for backward compat), `path`, `filepath`, `filename`. First non-empty wins. This handles OpenAI tool definitions that don't follow Anthropic's `file_path` convention.
+  4. `supportedTools` map gains common OpenAI tool name variants: `read_file`, `write_file`, `edit_file`, `apply_diff` (in addition to existing Anthropic `Read`/`Write`/etc.). Unknown tools are still ignored — a deliberate allowlist.
 - **Secretscan stage:** unchanged. Walks `ParsedRequest.Texts`. Now also sees `function_call_output` content (file contents the model is reading) — gives us secret detection on file-read responses too. Not a goal but a free side-effect.
 
 ### 4.5 Cursor backend traffic (`api2.cursor.sh`)
