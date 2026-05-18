@@ -39,7 +39,7 @@ func TestOpenAIChat_ExtractsToolCallArguments(t *testing.T) {
 	}
 }
 
-func TestOpenAIChat_ToolCallMalformedArgumentsSkipped(t *testing.T) {
+func TestOpenAIChat_ToolCallMalformedArgumentsPreservedRaw(t *testing.T) {
 	body := []byte(`{
 		"messages": [
 			{"role": "assistant", "tool_calls": [
@@ -91,6 +91,33 @@ func TestOpenAIChat_MultipleToolCallsInOneMessage(t *testing.T) {
 	tus := ExtractToolUses("api.openai.com", "/v1/chat/completions", body)
 	if len(tus) != 2 {
 		t.Fatalf("len = %d, want 2", len(tus))
+	}
+}
+
+func TestOpenAIChat_InlineObjectArgumentsHandled(t *testing.T) {
+	// Non-standard client sends arguments as an inline JSON object.
+	// Pre-fix this dropped ALL tool calls in the request due to typed
+	// string Unmarshal failure. Post-fix the call is preserved with
+	// Input holding the inline JSON.
+	body := []byte(`{
+		"messages": [
+			{"role": "assistant", "tool_calls": [
+				{"id": "x", "type": "function",
+				 "function": {"name": "read_file",
+				              "arguments": {"path": "/a"}}}
+			]}
+		]
+	}`)
+	tus := ExtractToolUses("api.openai.com", "/v1/chat/completions", body)
+	if len(tus) != 1 {
+		t.Fatalf("len = %d, want 1", len(tus))
+	}
+	var got map[string]any
+	if err := json.Unmarshal(tus[0].Input, &got); err != nil {
+		t.Fatalf("Input not valid JSON: %v; raw=%s", err, string(tus[0].Input))
+	}
+	if got["path"] != "/a" {
+		t.Errorf("Input.path = %v, want /a", got["path"])
 	}
 }
 

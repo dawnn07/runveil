@@ -22,8 +22,8 @@ type openAIToolCall struct {
 }
 
 type openAIFunctionCall struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+	Name      string          `json:"name"`
+	Arguments json.RawMessage `json:"arguments"`
 }
 
 func parseOpenAIChat(body []byte) (*ParsedRequest, error) {
@@ -120,10 +120,27 @@ func extractOpenAIChatToolUses(body []byte) []ToolUse {
 			}
 			out = append(out, ToolUse{
 				Tool:         tc.Function.Name,
-				Input:        json.RawMessage(tc.Function.Arguments),
+				Input:        decodeOpenAIArguments(tc.Function.Arguments),
 				MessageIndex: i,
 			})
 		}
 	}
 	return out
+}
+
+// decodeOpenAIArguments normalizes OpenAI's tool-call arguments field
+// into raw JSON bytes. The wire format is officially a JSON-encoded
+// string (e.g., "{\"path\":\"x\"}"); some clients send the inline object
+// directly. This probes the string form first, falls back to the raw
+// bytes. Malformed JSON is still passed through as-is so downstream
+// consumers (policy engine, audit) can decide how to handle it.
+func decodeOpenAIArguments(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	var asStr string
+	if err := json.Unmarshal(raw, &asStr); err == nil {
+		return json.RawMessage(asStr)
+	}
+	return raw
 }

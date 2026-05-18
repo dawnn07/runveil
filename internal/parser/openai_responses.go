@@ -125,13 +125,9 @@ func extractOpenAIResponsesToolUses(body []byte) []ToolUse {
 		if name == "" {
 			continue
 		}
-		var argsStr string
-		if argsRaw, ok := item["arguments"]; ok {
-			_ = json.Unmarshal(argsRaw, &argsStr)
-		}
 		out = append(out, ToolUse{
 			Tool:         name,
-			Input:        json.RawMessage(argsStr),
+			Input:        decodeOpenAIArguments(item["arguments"]),
 			MessageIndex: i,
 		})
 	}

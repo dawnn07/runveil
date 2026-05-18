@@ -42,6 +42,8 @@ func ExtractPathEvents(parsed *parser.ParsedRequest, body []byte) []PathEvent {
 	if parsed == nil || parsed.Vendor != "anthropic" {
 		return nil
 	}
+	// TODO(sp7-task4): replace the "/v1/messages" literal with the real
+	// request path so OpenAI requests are also scanned.
 	tools := parser.ExtractToolUses("api.anthropic.com", "/v1/messages", body)
 	if len(tools) == 0 {
 		return nil
