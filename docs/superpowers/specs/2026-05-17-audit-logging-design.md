@@ -460,3 +460,16 @@ Sub-project #6 is complete when:
 4. The design doc and implementation are committed to the repo.
 
 When these four hold, sub-project #7 (multi-tool support + protocol quirks) can begin without any audit-layer changes. Future enterprise work (SIEM forwarder, encrypted audit, signed chains) builds on this foundation.
+
+---
+
+## 11. Acceptance Result
+
+**Date:** 2026-05-18
+
+- `railcore proxy` wrote one record per request to `~/.railcore/audit.log` during a live Claude Code session.
+- `railcore logs --follow` streamed records in real-time as the proxy served them.
+- Confirmed first-match-wins policy semantics in the wild: a catch-all `default-warn` rule above `block-payments` caused the block rule never to fire; reordering specific block rules above the warn made `decision=block` records appear with `findings` populated.
+- Raw log file is valid JSON Lines (each line round-trips through `audit.Record`).
+
+**Status:** Pass. Sub-project #6 done definition §8 satisfied.
