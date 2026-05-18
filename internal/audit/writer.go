@@ -25,12 +25,13 @@ type Config struct {
 
 // Writer is the lumberjack-backed, async, file-writing Logger.
 type Writer struct {
-	logger  *slog.Logger
-	ch      chan Record
-	wg      sync.WaitGroup
-	lj      *lumberjack.Logger
-	closed  atomic.Bool
-	closeMu sync.Mutex
+	logger    *slog.Logger
+	ch        chan Record
+	done      chan struct{}
+	wg        sync.WaitGroup
+	lj        *lumberjack.Logger
+	closed    atomic.Bool
+	closeOnce sync.Once
 }
 
 // NewWriter probes that Path is writable, opens the lumberjack writer,
@@ -82,6 +83,7 @@ func NewWriter(cfg Config, logger *slog.Logger) (*Writer, error) {
 		logger: logger,
 		ch:     make(chan Record, cfg.BufferSize),
 		lj:     lj,
+		done:   make(chan struct{}),
 	}
 	w.wg.Add(1)
 	go w.run()
@@ -107,34 +109,55 @@ func (w *Writer) Log(r Record) {
 
 // Close drains the buffer, flushes lumberjack, stops the goroutine.
 // Idempotent. After Close, Log is a no-op.
+//
+// We never close w.ch — closing it would race concurrent Log calls and
+// cause "send on closed channel" panics. Instead we signal shutdown via
+// the done channel and let the run goroutine drain remaining records.
 func (w *Writer) Close() error {
-	w.closeMu.Lock()
-	defer w.closeMu.Unlock()
-	if w.closed.Load() {
-		return nil
-	}
-	w.closed.Store(true)
-	close(w.ch)
-	w.wg.Wait()
-	return w.lj.Close()
+	var err error
+	w.closeOnce.Do(func() {
+		w.closed.Store(true)
+		close(w.done)
+		w.wg.Wait()
+		err = w.lj.Close()
+	})
+	return err
 }
 
 // run is the background goroutine. Reads records from the channel
-// until it's closed, then exits.
+// until done is signaled, then drains any remaining buffered records
+// (non-blocking) and exits.
 func (w *Writer) run() {
 	defer w.wg.Done()
 	var buf bytes.Buffer
-	for r := range w.ch {
-		buf.Reset()
-		if err := json.NewEncoder(&buf).Encode(r); err != nil {
-			w.logger.Error("audit: marshal record",
-				"request_id", r.RequestID,
-				"err", err.Error())
-			continue
+	for {
+		select {
+		case r := <-w.ch:
+			w.writeRecord(&buf, r)
+		case <-w.done:
+			// Drain any remaining buffered records without blocking.
+			for {
+				select {
+				case r := <-w.ch:
+					w.writeRecord(&buf, r)
+				default:
+					return
+				}
+			}
 		}
-		if _, err := w.lj.Write(buf.Bytes()); err != nil {
-			w.logger.Error("audit: write",
-				"err", err.Error())
-		}
+	}
+}
+
+func (w *Writer) writeRecord(buf *bytes.Buffer, r Record) {
+	buf.Reset()
+	if err := json.NewEncoder(buf).Encode(r); err != nil {
+		w.logger.Error("audit: marshal record",
+			"request_id", r.RequestID,
+			"err", err.Error())
+		return
+	}
+	if _, err := w.lj.Write(buf.Bytes()); err != nil {
+		w.logger.Error("audit: write",
+			"err", err.Error())
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -123,4 +124,43 @@ func TestWriter_LogAfterCloseIsSafe(t *testing.T) {
 	_ = w.Close()
 	// Must not panic.
 	w.Log(Record{RequestID: "post-close"})
+}
+
+func TestWriter_LogDuringCloseDoesNotPanic(t *testing.T) {
+	// Stress test: many Log goroutines racing a Close. Pre-fix this
+	// reliably panicked with "send on closed channel" within a few
+	// iterations. Post-fix it must complete cleanly.
+	for trial := 0; trial < 50; trial++ {
+		dir := t.TempDir()
+		w, err := NewWriter(Config{
+			Path:       filepath.Join(dir, "audit.log"),
+			MaxSizeMB:  1,
+			MaxBackups: 1,
+			MaxAgeDays: 1,
+			BufferSize: 16,
+		}, discardLogger())
+		if err != nil {
+			t.Fatalf("NewWriter: %v", err)
+		}
+
+		var wg sync.WaitGroup
+		const loggers = 16
+		for g := 0; g < loggers; g++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for i := 0; i < 200; i++ {
+					w.Log(Record{RequestID: "stress"})
+				}
+			}()
+		}
+
+		// Close shortly after spawning the loggers. This is the race
+		// window pre-fix.
+		time.Sleep(50 * time.Microsecond)
+		if err := w.Close(); err != nil {
+			t.Errorf("trial %d Close: %v", trial, err)
+		}
+		wg.Wait()
+	}
 }
