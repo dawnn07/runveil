@@ -1,0 +1,126 @@
+package audit
+
+import (
+	"bufio"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func discardLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestNewWriter_HappyPath(t *testing.T) {
+	dir := t.TempDir()
+	w, err := NewWriter(Config{
+		Path:       filepath.Join(dir, "audit.log"),
+		MaxSizeMB:  1,
+		MaxBackups: 1,
+		MaxAgeDays: 1,
+	}, discardLogger())
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+}
+
+func TestNewWriter_RejectsEmptyPath(t *testing.T) {
+	_, err := NewWriter(Config{Path: ""}, discardLogger())
+	if err == nil {
+		t.Error("expected error for empty Path")
+	}
+}
+
+func TestNewWriter_RejectsZeroSize(t *testing.T) {
+	_, err := NewWriter(Config{
+		Path:      filepath.Join(t.TempDir(), "audit.log"),
+		MaxSizeMB: 0,
+	}, discardLogger())
+	if err == nil {
+		t.Error("expected error for MaxSizeMB=0")
+	}
+}
+
+func TestWriter_LogAndClose_WritesAllRecords(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+	w, err := NewWriter(Config{
+		Path:       path,
+		MaxSizeMB:  10,
+		MaxBackups: 1,
+		MaxAgeDays: 1,
+	}, discardLogger())
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+
+	const n = 100
+	for i := 0; i < n; i++ {
+		w.Log(Record{
+			Time:      time.Now(),
+			RequestID: "r",
+			Host:      "h",
+			Method:    "POST",
+			Path:      "/x",
+			Status:    200,
+			Decision:  "continue",
+		})
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	count := 0
+	for scanner.Scan() {
+		var r Record
+		if err := json.Unmarshal(scanner.Bytes(), &r); err != nil {
+			t.Errorf("line %d not JSON: %v", count, err)
+		}
+		count++
+	}
+	if count != n {
+		t.Errorf("got %d lines, want %d", count, n)
+	}
+}
+
+func TestWriter_CloseIsIdempotent(t *testing.T) {
+	w, _ := NewWriter(Config{
+		Path:       filepath.Join(t.TempDir(), "audit.log"),
+		MaxSizeMB:  1,
+		MaxBackups: 1,
+		MaxAgeDays: 1,
+	}, discardLogger())
+	if err := w.Close(); err != nil {
+		t.Errorf("first Close: %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Errorf("second Close: %v", err)
+	}
+}
+
+func TestWriter_LogAfterCloseIsSafe(t *testing.T) {
+	w, _ := NewWriter(Config{
+		Path:       filepath.Join(t.TempDir(), "audit.log"),
+		MaxSizeMB:  1,
+		MaxBackups: 1,
+		MaxAgeDays: 1,
+	}, discardLogger())
+	_ = w.Close()
+	// Must not panic.
+	w.Log(Record{RequestID: "post-close"})
+}
