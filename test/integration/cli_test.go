@@ -382,3 +382,53 @@ func TestCLI_Help(t *testing.T) {
 		})
 	}
 }
+
+func TestCLI_Logs_FileNotFound(t *testing.T) {
+	dir := t.TempDir()
+	_, stderr, code := runCLI(t, "logs", "--data-dir", dir)
+	if code != 1 {
+		t.Errorf("exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr, "file not found") {
+		t.Errorf("stderr should say 'file not found'; got %q", stderr)
+	}
+}
+
+func TestCLI_Logs_LastN(t *testing.T) {
+	dir := t.TempDir()
+	auditPath := filepath.Join(dir, "audit.log")
+
+	var lines []string
+	for i := 0; i < 10; i++ {
+		lines = append(lines, fmt.Sprintf(`{"time":"2026-05-17T16:33:%02dZ","request_id":"r%d","host":"h","method":"GET","path":"/","status":200,"bytes_in":0,"bytes_out":0,"duration_ms":1,"decision":"continue"}`, i, i))
+	}
+	if err := os.WriteFile(auditPath, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	stdout, _, code := runCLI(t, "logs", "--data-dir", dir, "-n", "5")
+	if code != 0 {
+		t.Errorf("exit code = %d, want 0", code)
+	}
+	count := strings.Count(stdout, "\n")
+	if count != 5 {
+		t.Errorf("got %d output lines, want 5", count)
+	}
+}
+
+func TestCLI_Logs_JSON(t *testing.T) {
+	dir := t.TempDir()
+	auditPath := filepath.Join(dir, "audit.log")
+	line := `{"time":"2026-05-17T16:33:12Z","request_id":"r","host":"h","method":"GET","path":"/","status":200,"bytes_in":0,"bytes_out":0,"duration_ms":1,"decision":"continue"}`
+	if err := os.WriteFile(auditPath, []byte(line+"\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	stdout, _, code := runCLI(t, "logs", "--data-dir", dir, "--json", "-n", "5")
+	if code != 0 {
+		t.Errorf("exit code = %d", code)
+	}
+	if !strings.Contains(stdout, `"request_id":"r"`) {
+		t.Errorf("stdout should contain raw JSON; got %q", stdout)
+	}
+}
