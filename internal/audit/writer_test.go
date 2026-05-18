@@ -2,6 +2,7 @@ package audit
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -162,5 +163,125 @@ func TestWriter_LogDuringCloseDoesNotPanic(t *testing.T) {
 			t.Errorf("trial %d Close: %v", trial, err)
 		}
 		wg.Wait()
+	}
+}
+
+// captureHandler captures slog records to a slice so tests can assert
+// on warning/error messages.
+type captureHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *captureHandler) Enabled(_ context.Context, _ slog.Level) bool { return true }
+func (h *captureHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r)
+	return nil
+}
+func (h *captureHandler) WithAttrs(_ []slog.Attr) slog.Handler { return h }
+func (h *captureHandler) WithGroup(_ string) slog.Handler      { return h }
+
+func (h *captureHandler) hasMessage(msg string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, r := range h.records {
+		if r.Message == msg {
+			return true
+		}
+	}
+	return false
+}
+
+func TestWriter_ChannelFullDropsRecord(t *testing.T) {
+	// Tiny buffer (1) and spam records faster than the goroutine can
+	// pull them, forcing at least one channel-full drop.
+	ch := &captureHandler{}
+	logger := slog.New(ch)
+
+	dir := t.TempDir()
+	w, err := NewWriter(Config{
+		Path:       filepath.Join(dir, "audit.log"),
+		MaxSizeMB:  1,
+		MaxBackups: 1,
+		MaxAgeDays: 1,
+		BufferSize: 1,
+	}, logger)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+
+	for i := 0; i < 10000; i++ {
+		w.Log(Record{RequestID: "spam"})
+	}
+	if err := w.Close(); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+
+	if !ch.hasMessage("audit channel full; dropping record") {
+		t.Errorf("expected at least one channel-full warning")
+	}
+}
+
+func TestWriter_ConcurrentLog(t *testing.T) {
+	// All Logs happen before Close (concurrent integrity, not
+	// concurrent shutdown). Verifies that every record makes it
+	// through and the file is well-formed JSONL.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+	w, err := NewWriter(Config{
+		Path:       path,
+		MaxSizeMB:  100,
+		MaxBackups: 1,
+		MaxAgeDays: 1,
+		BufferSize: 4096,
+	}, discardLogger())
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+
+	const goroutines = 32
+	const perGoroutine = 100
+	var wg sync.WaitGroup
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < perGoroutine; i++ {
+				w.Log(Record{
+					Time:      time.Now(),
+					RequestID: "concurrent",
+					Host:      "x",
+					Method:    "POST",
+					Path:      "/",
+					Status:    200,
+					Decision:  "continue",
+				})
+			}
+		}()
+	}
+	wg.Wait()
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	count := 0
+	for scanner.Scan() {
+		var r Record
+		if err := json.Unmarshal(scanner.Bytes(), &r); err != nil {
+			t.Errorf("line not JSON: %v", err)
+		}
+		count++
+	}
+	if count != goroutines*perGoroutine {
+		t.Errorf("got %d lines, want %d", count, goroutines*perGoroutine)
 	}
 }
