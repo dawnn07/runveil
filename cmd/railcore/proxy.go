@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
 	"railcore/internal/audit"
 	"railcore/internal/ca"
@@ -84,6 +85,57 @@ func runProxy(args []string) {
 
 	chain := pipeline.NewChain().WithLogger(logger)
 	policies := policy.NewProvider(loadedPolicy)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Hot reload: watch the resolved policy file. If no policy was
+	// loaded at startup (resolvedPath==""), skip — there's nothing to
+	// watch and reload will need a restart anyway.
+	if resolvedPath != "" {
+		watcher, werr := policy.NewWatcher(resolvedPath, logger,
+			func(np *policy.Policy) {
+				before := policies.Get().RuleCount()
+				policies.Set(np)
+				auditLogger.Event(audit.Event{
+					Time:        time.Now(),
+					Kind:        "policy_reload",
+					PolicyPath:  resolvedPath,
+					Outcome:     "accepted",
+					RulesBefore: before,
+					RulesAfter:  np.RuleCount(),
+				})
+				logger.Info("policy reloaded",
+					"path", resolvedPath,
+					"rules_before", before,
+					"rules_after", np.RuleCount())
+			},
+			func(rerr error, _ []byte) {
+				before := policies.Get().RuleCount()
+				auditLogger.Event(audit.Event{
+					Time:        time.Now(),
+					Kind:        "policy_reload",
+					PolicyPath:  resolvedPath,
+					Outcome:     "rejected",
+					RulesBefore: before,
+					Error:       rerr.Error(),
+				})
+				logger.Warn("policy reload rejected",
+					"path", resolvedPath,
+					"err", rerr.Error())
+			},
+		)
+		if werr != nil {
+			logger.Error("policy watcher init failed", "err", werr.Error())
+			os.Exit(1)
+		}
+		if werr := watcher.Start(ctx); werr != nil {
+			logger.Error("policy watcher start failed", "err", werr.Error())
+			os.Exit(1)
+		}
+		defer func() { _ = watcher.Close() }()
+	}
+
 	chain.Register(pathscan.New(pathscan.Config{Policies: policies}, logger))
 	chain.Register(secretscan.New(secretscan.Config{
 		BlockOnDetect: effectiveBlock,
@@ -116,9 +168,6 @@ func runProxy(args []string) {
 		startupArgs = append(startupArgs, "policy_path", resolvedPath, "rules", len(loadedPolicy.Rules))
 	}
 	logger.Info("railcore proxy listening", startupArgs...)
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	go func() {
 		<-ctx.Done()
