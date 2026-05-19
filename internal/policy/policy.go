@@ -133,3 +133,11 @@ func (p *Policy) DecidePath(path string) (Action, *Rule) {
 	}
 	return ActionWarn, nil
 }
+
+// RuleCount returns the number of rules in this policy. Nil-safe.
+func (p *Policy) RuleCount() int {
+	if p == nil {
+		return 0
+	}
+	return len(p.Rules)
+}

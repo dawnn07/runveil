@@ -838,3 +838,22 @@ rules:
 		t.Fatal("expected error for empty path")
 	}
 }
+
+func TestPolicy_RuleCount(t *testing.T) {
+	cases := []struct {
+		name string
+		p    *Policy
+		want int
+	}{
+		{"nil", nil, 0},
+		{"empty", &Policy{}, 0},
+		{"three rules", &Policy{Rules: make([]Rule, 3)}, 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.p.RuleCount(); got != tc.want {
+				t.Errorf("RuleCount = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
