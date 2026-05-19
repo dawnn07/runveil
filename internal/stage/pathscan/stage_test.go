@@ -298,3 +298,47 @@ rules:
 		t.Error("expected payments path in metadata")
 	}
 }
+
+func TestStage_LiveSwapPicksUpNewPolicy(t *testing.T) {
+	allowPolicy := mkPolicy(t, `
+version: 1
+rules:
+  - name: warn-all
+    match: {all: true}
+    action: warn
+`)
+	blockPolicy := mkPolicy(t, `
+version: 1
+rules:
+  - name: block-payments
+    match: {path: "**/payments/**"}
+    action: block
+`)
+
+	provider := policy.NewProvider(allowPolicy)
+	s := New(Config{Policies: provider}, discardLogger())
+
+	body := `{
+		"messages": [
+			{"role": "assistant", "content": [
+				{"type": "tool_use", "name": "Read", "id": "x",
+				 "input": {"file_path": "/src/payments/charge.go"}}
+			]}
+		]
+	}`
+	rc := newRC(t, "api.anthropic.com", body, http.MethodPost, "/v1/messages")
+
+	dec, _ := s.Process(context.Background(), rc)
+	if dec != pipeline.Continue {
+		t.Errorf("first Process with allow policy: dec = %v, want Continue", dec)
+	}
+
+	// Live swap.
+	provider.Set(blockPolicy)
+
+	rc2 := newRC(t, "api.anthropic.com", body, http.MethodPost, "/v1/messages")
+	dec2, _ := s.Process(context.Background(), rc2)
+	if dec2 != pipeline.Block {
+		t.Errorf("second Process with block policy: dec = %v, want Block", dec2)
+	}
+}

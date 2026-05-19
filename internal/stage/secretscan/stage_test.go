@@ -311,6 +311,42 @@ func TestSecretscan_EmptyPolicyDefaultsToWarn(t *testing.T) {
 	}
 }
 
+func TestStage_LiveSwapPicksUpNewPolicy(t *testing.T) {
+	warnPolicy := mkPolicy(t, `
+version: 1
+rules:
+  - name: warn-aws
+    match: {pattern: aws_*}
+    action: warn
+`)
+	blockPolicy := mkPolicy(t, `
+version: 1
+rules:
+  - name: block-aws
+    match: {pattern: aws_*}
+    action: block
+`)
+
+	provider := policy.NewProvider(warnPolicy)
+	s := New(Config{Policies: provider}, discardLogger())
+
+	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"key: AKIAIOSFODNN7EXAMPLE"}]}`
+	rc := newRC(t, "api.openai.com", body, http.MethodPost, "/v1/chat/completions")
+
+	dec, _ := s.Process(context.Background(), rc)
+	if dec != pipeline.Continue {
+		t.Errorf("warn policy: dec = %v, want Continue", dec)
+	}
+
+	provider.Set(blockPolicy)
+
+	rc2 := newRC(t, "api.openai.com", body, http.MethodPost, "/v1/chat/completions")
+	dec2, _ := s.Process(context.Background(), rc2)
+	if dec2 != pipeline.Block {
+		t.Errorf("block policy: dec = %v, want Block", dec2)
+	}
+}
+
 func TestEnrichedFinding_MarshalJSON_IncludesDetector(t *testing.T) {
 	ef := EnrichedFinding{
 		Finding:      detector.Finding{Pattern: "aws_access_key_id", Severity: detector.SeverityHigh},
