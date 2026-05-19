@@ -668,6 +668,10 @@ func (c *captureAudit) Log(r audit.Record) {
 	c.mu.Unlock()
 }
 
+func (c *captureAudit) Event(_ audit.Event) {
+	// Tests don't currently assert on synthetic events.
+}
+
 func (c *captureAudit) get() []audit.Record {
 	c.mu.Lock()
 	defer c.mu.Unlock()

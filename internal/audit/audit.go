@@ -45,11 +45,42 @@ type Record struct {
 	Findings []any  `json:"findings,omitempty"`
 }
 
-// Logger is the consumer-facing interface. Proxy holds a Logger
-// (never a concrete *Writer) so tests can inject capturing or no-op
+// Event is a synthetic (non-request) audit record. Currently used for
+// policy reload notifications. Future synthetic event kinds reuse this
+// shape with a different Kind value.
+//
+// Wire format (JSON tags):
+//
+//	time          RFC3339Nano UTC
+//	kind          event discriminator (e.g., "policy_reload")
+//	policy_path   absolute path that triggered the event (omitempty)
+//	outcome       "accepted" | "rejected" (omitempty)
+//	rules_before  rule count of the policy that was active before
+//	              (omitempty when zero)
+//	rules_after   rule count after a successful reload (omitempty when
+//	              zero — also omitted on rejection)
+//	error         the validation error string (omitempty — only set on
+//	              rejection)
+type Event struct {
+	Time        time.Time `json:"time"`
+	Kind        string    `json:"kind"`
+	PolicyPath  string    `json:"policy_path,omitempty"`
+	Outcome     string    `json:"outcome,omitempty"`
+	RulesBefore int       `json:"rules_before,omitempty"`
+	RulesAfter  int       `json:"rules_after,omitempty"`
+	Error       string    `json:"error,omitempty"`
+}
+
+// Logger is the consumer-facing interface. Proxy holds a Logger (never
+// a concrete *Writer) so tests can inject capturing or no-op
 // implementations.
+//
+// Log emits one per-request record. Event emits one synthetic record
+// (e.g., a policy reload notification). Both are async — implementations
+// are free to drop on backpressure.
 type Logger interface {
 	Log(r Record)
+	Event(e Event)
 }
 
 // NoopLogger discards records. Used as the default when no audit
@@ -58,3 +89,6 @@ type NoopLogger struct{}
 
 // Log implements Logger by doing nothing.
 func (NoopLogger) Log(_ Record) {}
+
+// Event implements Logger by doing nothing.
+func (NoopLogger) Event(_ Event) {}

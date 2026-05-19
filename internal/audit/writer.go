@@ -27,11 +27,12 @@ type Config struct {
 type Writer struct {
 	logger    *slog.Logger
 	ch        chan Record
-	done      chan struct{}
+	evCh      chan Event
 	wg        sync.WaitGroup
 	lj        *lumberjack.Logger
 	closed    atomic.Bool
 	closeOnce sync.Once
+	done      chan struct{}
 }
 
 // NewWriter probes that Path is writable, opens the lumberjack writer,
@@ -82,6 +83,7 @@ func NewWriter(cfg Config, logger *slog.Logger) (*Writer, error) {
 	w := &Writer{
 		logger: logger,
 		ch:     make(chan Record, cfg.BufferSize),
+		evCh:   make(chan Event, cfg.BufferSize),
 		lj:     lj,
 		done:   make(chan struct{}),
 	}
@@ -107,6 +109,20 @@ func (w *Writer) Log(r Record) {
 	}
 }
 
+// Event implements Logger. Non-blocking: drops the event (with a WARN
+// to the slog logger) if the channel is full. Safe to call after Close.
+func (w *Writer) Event(e Event) {
+	if w == nil || w.closed.Load() {
+		return
+	}
+	select {
+	case w.evCh <- e:
+	default:
+		w.logger.Warn("audit event channel full; dropping event",
+			"kind", e.Kind)
+	}
+}
+
 // Close drains the buffer, flushes lumberjack, stops the goroutine.
 // Idempotent. After Close, Log is a no-op.
 //
@@ -124,9 +140,9 @@ func (w *Writer) Close() error {
 	return err
 }
 
-// run is the background goroutine. Reads records from the channel
-// until done is signaled, then drains any remaining buffered records
-// (non-blocking) and exits.
+// run is the background goroutine. Reads records and events from their
+// channels until done is signaled, then drains any remaining buffered
+// items (non-blocking) and exits.
 func (w *Writer) run() {
 	defer w.wg.Done()
 	var buf bytes.Buffer
@@ -134,12 +150,15 @@ func (w *Writer) run() {
 		select {
 		case r := <-w.ch:
 			w.writeRecord(&buf, r)
+		case e := <-w.evCh:
+			w.writeEvent(&buf, e)
 		case <-w.done:
-			// Drain any remaining buffered records without blocking.
 			for {
 				select {
 				case r := <-w.ch:
 					w.writeRecord(&buf, r)
+				case e := <-w.evCh:
+					w.writeEvent(&buf, e)
 				default:
 					return
 				}
@@ -158,6 +177,23 @@ func (w *Writer) writeRecord(buf *bytes.Buffer, r Record) {
 	}
 	if _, err := w.lj.Write(buf.Bytes()); err != nil {
 		w.logger.Error("audit: write",
+			"err", err.Error())
+	}
+}
+
+// writeEvent marshals an Event and writes it via lumberjack. Same shape
+// as writeRecord but with the Event type. Errors are logged and the
+// event dropped — the writer survives.
+func (w *Writer) writeEvent(buf *bytes.Buffer, e Event) {
+	buf.Reset()
+	if err := json.NewEncoder(buf).Encode(e); err != nil {
+		w.logger.Error("audit: marshal event",
+			"kind", e.Kind,
+			"err", err.Error())
+		return
+	}
+	if _, err := w.lj.Write(buf.Bytes()); err != nil {
+		w.logger.Error("audit: write event",
 			"err", err.Error())
 	}
 }

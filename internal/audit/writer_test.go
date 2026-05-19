@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -283,5 +284,47 @@ func TestWriter_ConcurrentLog(t *testing.T) {
 	}
 	if count != goroutines*perGoroutine {
 		t.Errorf("got %d lines, want %d", count, goroutines*perGoroutine)
+	}
+}
+
+func TestWriter_LogsEventToFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+	w, err := NewWriter(Config{
+		Path:       path,
+		MaxSizeMB:  10,
+		MaxBackups: 1,
+		MaxAgeDays: 1,
+	}, discardLogger())
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	w.Event(Event{
+		Time:        time.Date(2026, 5, 19, 10, 1, 23, 0, time.UTC),
+		Kind:        "policy_reload",
+		PolicyPath:  "/x",
+		Outcome:     "accepted",
+		RulesBefore: 2,
+		RulesAfter:  3,
+	})
+	if err := w.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		`"kind":"policy_reload"`,
+		`"policy_path":"/x"`,
+		`"outcome":"accepted"`,
+		`"rules_before":2`,
+		`"rules_after":3`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in file:\n%s", want, s)
+		}
 	}
 }

@@ -81,3 +81,58 @@ func TestNoopLogger_LogIsSafe(t *testing.T) {
 		l.Log(Record{RequestID: "test"})
 	}
 }
+
+func TestEvent_MarshalJSON_AllFields(t *testing.T) {
+	e := Event{
+		Time:        time.Date(2026, 5, 19, 10, 1, 23, 0, time.UTC),
+		Kind:        "policy_reload",
+		PolicyPath:  "/home/dawn/.railcore/policy.yaml",
+		Outcome:     "accepted",
+		RulesBefore: 2,
+		RulesAfter:  3,
+	}
+	data, err := json.Marshal(e)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	for _, want := range []string{
+		`"time":"2026-05-19T10:01:23Z"`,
+		`"kind":"policy_reload"`,
+		`"policy_path":"/home/dawn/.railcore/policy.yaml"`,
+		`"outcome":"accepted"`,
+		`"rules_before":2`,
+		`"rules_after":3`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+}
+
+func TestEvent_MarshalJSON_OmitsEmptyOptionals(t *testing.T) {
+	e := Event{
+		Time: time.Now(),
+		Kind: "policy_reload",
+	}
+	data, _ := json.Marshal(e)
+	s := string(data)
+	for _, absent := range []string{
+		`"policy_path"`,
+		`"outcome"`,
+		`"rules_before"`,
+		`"rules_after"`,
+		`"error"`,
+	} {
+		if strings.Contains(s, absent) {
+			t.Errorf("field %s should be omitted when empty; got %s", absent, s)
+		}
+	}
+}
+
+func TestNoopLogger_EventIsSafe(t *testing.T) {
+	var l Logger = NoopLogger{}
+	for i := 0; i < 5; i++ {
+		l.Event(Event{Kind: "policy_reload"})
+	}
+}
