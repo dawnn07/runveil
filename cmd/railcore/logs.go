@@ -55,17 +55,17 @@ func runLogs(args []string) {
 		fmt.Fprintf(os.Stderr, "logs: read %s: %v\n", path, err)
 		os.Exit(1)
 	}
-	records, skipped := parseAuditBytes(data)
+	lines, skipped := parseAuditLines(data)
 	if skipped > 0 {
 		fmt.Fprintf(os.Stderr, "logs: skipped %d malformed lines\n", skipped)
 	}
 
 	startIdx := 0
-	if len(records) > *numLines {
-		startIdx = len(records) - *numLines
+	if len(lines) > *numLines {
+		startIdx = len(lines) - *numLines
 	}
-	for _, r := range records[startIdx:] {
-		emit(r, *jsonOut)
+	for _, raw := range lines[startIdx:] {
+		emitLine(raw, *jsonOut)
 	}
 
 	if !*follow {
@@ -111,11 +111,7 @@ func runLogs(args []string) {
 			continue
 		}
 		for scanner.Scan() {
-			var r audit.Record
-			if err := json.Unmarshal(scanner.Bytes(), &r); err != nil {
-				continue
-			}
-			emit(r, *jsonOut)
+			emitLine(scanner.Bytes(), *jsonOut)
 		}
 		offset, _ = f.Seek(0, io.SeekCurrent)
 	}
@@ -188,4 +184,75 @@ func extractRuleNames(findings []any) []string {
 		names = append(names, rule)
 	}
 	return names
+}
+
+// parseAuditLines splits the input into non-empty JSON lines. Each
+// line is returned as raw bytes; the caller dispatches by inspecting
+// the "kind" field. Lines that don't look like JSON are counted as
+// skipped.
+func parseAuditLines(data []byte) (lines [][]byte, skipped int) {
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		if line[0] != '{' {
+			skipped++
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return lines, skipped
+}
+
+// emitLine prints one raw JSONL line. In --json mode it passes the
+// bytes through unchanged; otherwise it dispatches by kind to either
+// formatRecord (request) or formatEvent (synthetic event).
+func emitLine(raw []byte, jsonOut bool) {
+	if jsonOut {
+		os.Stdout.Write(raw)
+		os.Stdout.Write([]byte("\n"))
+		return
+	}
+	if lineIsEvent(raw) {
+		fmt.Println(formatEvent(raw))
+		return
+	}
+	var r audit.Record
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return
+	}
+	fmt.Println(formatRecord(r))
+}
+
+// lineIsEvent returns true if the raw JSONL line carries a non-empty
+// "kind" field (i.e., is an audit.Event, not an audit.Record).
+func lineIsEvent(raw []byte) bool {
+	var probe struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return false
+	}
+	return probe.Kind != ""
+}
+
+// formatEvent renders a synthetic audit.Event line. Currently only
+// kind="policy_reload" is rendered specifically; other kinds get a
+// generic fallback. Returns "" if the line fails to unmarshal as an
+// Event.
+func formatEvent(raw []byte) string {
+	var e audit.Event
+	if err := json.Unmarshal(raw, &e); err != nil {
+		return ""
+	}
+	hhmmss := e.Time.Format("15:04:05")
+	if e.Kind != "policy_reload" {
+		return fmt.Sprintf("%s  %s  %s", hhmmss, e.Kind, e.PolicyPath)
+	}
+	if e.Outcome == "accepted" {
+		return fmt.Sprintf("%s  ⟳  policy_reload  %s  accepted  %d→%d rules",
+			hhmmss, e.PolicyPath, e.RulesBefore, e.RulesAfter)
+	}
+	return fmt.Sprintf("%s  ⚠  policy_reload  %s  rejected  rules_before=%d  err='%s'",
+		hhmmss, e.PolicyPath, e.RulesBefore, e.Error)
 }

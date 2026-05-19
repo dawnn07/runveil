@@ -81,3 +81,43 @@ not json
 		t.Errorf("got %d skipped, want 1", skipped)
 	}
 }
+
+func TestFormatEvent_PolicyReloadAccepted(t *testing.T) {
+	line := []byte(`{"time":"2026-05-19T10:01:23Z","kind":"policy_reload","policy_path":"/x/policy.yaml","outcome":"accepted","rules_before":2,"rules_after":3}`)
+	got := formatEvent(line)
+	for _, want := range []string{"10:01:23", "⟳", "policy_reload", "/x/policy.yaml", "accepted", "2→3 rules"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestFormatEvent_PolicyReloadRejected(t *testing.T) {
+	line := []byte(`{"time":"2026-05-19T10:01:45Z","kind":"policy_reload","policy_path":"/x/policy.yaml","outcome":"rejected","rules_before":3,"error":"bad glob"}`)
+	got := formatEvent(line)
+	for _, want := range []string{"⚠", "rejected", "rules_before=3", "err='bad glob'"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestLineIsEvent(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want bool
+	}{
+		{"request record (no kind)", `{"time":"2026-05-19T10:00:00Z","request_id":"r","host":"h"}`, false},
+		{"policy_reload event", `{"time":"2026-05-19T10:00:00Z","kind":"policy_reload","outcome":"accepted"}`, true},
+		{"empty kind value", `{"time":"2026-05-19T10:00:00Z","kind":""}`, false},
+		{"malformed", `not json`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := lineIsEvent([]byte(tc.line)); got != tc.want {
+				t.Errorf("lineIsEvent(%q) = %v, want %v", tc.line, got, tc.want)
+			}
+		})
+	}
+}
