@@ -18,8 +18,9 @@ import (
 
 // Config controls the stage's runtime behavior.
 type Config struct {
-	// Policy drives all decisions. When nil, the stage is a silent no-op.
-	Policy *policy.Policy
+	// Policies serves the active policy via wait-free atomic reads.
+	// When nil or Get() returns nil, the stage is a silent no-op.
+	Policies *policy.Provider
 }
 
 // PathFinding pairs an extracted PathEvent with the rule that decided
@@ -70,7 +71,11 @@ func (s *Stage) Name() string { return "path-scan" }
 
 // Process implements pipeline.Stage.
 func (s *Stage) Process(ctx context.Context, rc *pipeline.RequestCtx) (pipeline.Decision, error) {
-	if s.cfg.Policy == nil {
+	if s.cfg.Policies == nil {
+		return pipeline.Continue, nil
+	}
+	pol := s.cfg.Policies.Get()
+	if pol == nil {
 		return pipeline.Continue, nil
 	}
 
@@ -94,7 +99,7 @@ func (s *Stage) Process(ctx context.Context, rc *pipeline.RequestCtx) (pipeline.
 	anyBlock := false
 
 	for _, e := range events {
-		action, rule := s.cfg.Policy.DecidePath(e.Path)
+		action, rule := pol.DecidePath(e.Path)
 		ruleName := ""
 		if rule != nil {
 			ruleName = rule.Name

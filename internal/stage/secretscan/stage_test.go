@@ -180,7 +180,7 @@ rules:
     match: {all: true}
     action: warn
 `)
-	s := New(Config{Policy: pol}, discardLogger())
+	s := New(Config{Policies: policy.NewProvider(pol)}, discardLogger())
 	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"key: AKIAIOSFODNN7EXAMPLE"}]}`
 	rc := newRC(t, "api.openai.com", body, http.MethodPost, "/v1/chat/completions")
 	dec, err := s.Process(context.Background(), rc)
@@ -210,7 +210,7 @@ rules:
     match: {pattern: aws_*}
     action: block
 `)
-	s := New(Config{BlockOnDetect: true, Policy: pol}, discardLogger())
+	s := New(Config{BlockOnDetect: true, Policies: policy.NewProvider(pol)}, discardLogger())
 	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"key: AKIAIOSFODNN7EXAMPLE"}]}`
 	rc := newRC(t, "api.openai.com", body, http.MethodPost, "/v1/chat/completions")
 	dec, err := s.Process(context.Background(), rc)
@@ -236,7 +236,7 @@ rules:
     match: {all: true}
     action: warn
 `)
-	s := New(Config{Policy: pol}, discardLogger())
+	s := New(Config{Policies: policy.NewProvider(pol)}, discardLogger())
 	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"key: AKIAIOSFODNN7EXAMPLE"}]}`
 	rc := newRC(t, "api.openai.com", body, http.MethodPost, "/v1/chat/completions")
 	dec, err := s.Process(context.Background(), rc)
@@ -266,7 +266,7 @@ rules:
     match: {pattern: github_*}
     action: block
 `)
-	s := New(Config{Policy: pol}, discardLogger())
+	s := New(Config{Policies: policy.NewProvider(pol)}, discardLogger())
 	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"AKIAIOSFODNN7EXAMPLE and ghp_abcdefghijklmnopqrstuvwxyz0123456789"}]}`
 	rc := newRC(t, "api.openai.com", body, http.MethodPost, "/v1/chat/completions")
 	dec, err := s.Process(context.Background(), rc)
@@ -299,7 +299,7 @@ rules:
 
 func TestSecretscan_EmptyPolicyDefaultsToWarn(t *testing.T) {
 	pol := &policy.Policy{Version: 1}
-	s := New(Config{Policy: pol}, discardLogger())
+	s := New(Config{Policies: policy.NewProvider(pol)}, discardLogger())
 	body := `{"model":"gpt-4o","messages":[{"role":"user","content":"key: AKIAIOSFODNN7EXAMPLE"}]}`
 	rc := newRC(t, "api.openai.com", body, http.MethodPost, "/v1/chat/completions")
 	dec, err := s.Process(context.Background(), rc)

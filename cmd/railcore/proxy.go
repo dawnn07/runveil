@@ -83,10 +83,11 @@ func runProxy(args []string) {
 	}
 
 	chain := pipeline.NewChain().WithLogger(logger)
-	chain.Register(pathscan.New(pathscan.Config{Policy: loadedPolicy}, logger))
+	policies := policy.NewProvider(loadedPolicy)
+	chain.Register(pathscan.New(pathscan.Config{Policies: policies}, logger))
 	chain.Register(secretscan.New(secretscan.Config{
 		BlockOnDetect: effectiveBlock,
-		Policy:        loadedPolicy,
+		Policies:      policies,
 	}, logger))
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)

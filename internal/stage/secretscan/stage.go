@@ -23,8 +23,8 @@ type Config struct {
 	// BlockOnDetect: when true, any High-severity finding produces Block.
 	// Medium/Low never block. When false (default), all findings are
 	// logged but the request still proceeds upstream.
-	BlockOnDetect bool           // used when Policy is nil
-	Policy        *policy.Policy // when non-nil, drives all decisions
+	BlockOnDetect bool             // used when no policy is active
+	Policies      *policy.Provider // wait-free atomic access to the active policy
 }
 
 // EnrichedFinding pairs a detector.Finding with the segment metadata
@@ -112,8 +112,12 @@ func (s *Stage) Process(ctx context.Context, rc *pipeline.RequestCtx) (pipeline.
 		return pipeline.Continue, nil
 	}
 
-	if s.cfg.Policy != nil {
-		return s.decideWithPolicy(rc, parsed, raw)
+	var pol *policy.Policy
+	if s.cfg.Policies != nil {
+		pol = s.cfg.Policies.Get()
+	}
+	if pol != nil {
+		return s.decideWithPolicy(rc, parsed, raw, pol)
 	}
 	return s.decideWithFlag(rc, parsed, raw)
 }
@@ -160,9 +164,11 @@ func (s *Stage) decideWithFlag(rc *pipeline.RequestCtx, parsed *parser.ParsedReq
 	return pipeline.Continue, nil
 }
 
-// decideWithPolicy applies the configured Policy rule-by-rule, suppresses
+// decideWithPolicy applies the snapshotted Policy rule-by-rule, suppresses
 // allowed findings, blocks if any rule's action is Block, otherwise warns.
-func (s *Stage) decideWithPolicy(rc *pipeline.RequestCtx, parsed *parser.ParsedRequest, raw []EnrichedFinding) (pipeline.Decision, error) {
+// pol is passed in explicitly to guarantee the whole request sees a single
+// consistent policy version even if a reload fires mid-pipeline.
+func (s *Stage) decideWithPolicy(rc *pipeline.RequestCtx, parsed *parser.ParsedRequest, raw []EnrichedFinding, pol *policy.Policy) (pipeline.Decision, error) {
 	requestID, _ := rc.Metadata["request_id"].(string)
 
 	var kept []EnrichedFinding
@@ -173,7 +179,7 @@ func (s *Stage) decideWithPolicy(rc *pipeline.RequestCtx, parsed *parser.ParsedR
 	anyBlock := false
 
 	for _, f := range raw {
-		action, rule := s.cfg.Policy.Decide(f.Finding)
+		action, rule := pol.Decide(f.Finding)
 		ruleName := ""
 		if rule != nil {
 			ruleName = rule.Name

@@ -53,7 +53,7 @@ rules:
 	}
 
 	chain := pipeline.NewChain()
-	chain.Register(pathscanstage.New(pathscanstage.Config{Policy: pol}, nil))
+	chain.Register(pathscanstage.New(pathscanstage.Config{Policies: policy.NewProvider(pol)}, nil))
 
 	srv := proxy.New(proxy.Config{
 		Addr:             "127.0.0.1:0",

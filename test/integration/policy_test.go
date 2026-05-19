@@ -47,7 +47,7 @@ func setupPolicy(t *testing.T, policyYAML string) (client *http.Client, upstream
 		t.Fatalf("ca: %v", err)
 	}
 	chain := pipeline.NewChain()
-	chain.Register(secretscan.New(secretscan.Config{Policy: pol}, nil))
+	chain.Register(secretscan.New(secretscan.Config{Policies: policy.NewProvider(pol)}, nil))
 
 	srv := proxy.New(proxy.Config{
 		Addr:             "127.0.0.1:0",

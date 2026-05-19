@@ -48,7 +48,7 @@ rules:
     match: {path: "**/payments/**"}
     action: block
 `)
-	s := New(Config{Policy: pol}, discardLogger())
+	s := New(Config{Policies: policy.NewProvider(pol)}, discardLogger())
 	rc := newRC(t, "example.com", `{}`, http.MethodPost, "/anything")
 	dec, err := s.Process(context.Background(), rc)
 	if err != nil {
@@ -70,7 +70,7 @@ rules:
     match: {path: "**/payments/**"}
     action: block
 `)
-	s := New(Config{Policy: pol}, discardLogger())
+	s := New(Config{Policies: policy.NewProvider(pol)}, discardLogger())
 	body := `{"messages":[{"role":"user","content":"hello"}]}`
 	rc := newRC(t, "api.anthropic.com", body, http.MethodPost, "/v1/messages")
 	dec, err := s.Process(context.Background(), rc)
@@ -90,7 +90,7 @@ rules:
     match: {path: "**/payments/**"}
     action: block
 `)
-	s := New(Config{Policy: pol}, discardLogger())
+	s := New(Config{Policies: policy.NewProvider(pol)}, discardLogger())
 	body := `{
 		"messages": [
 			{"role": "assistant", "content": [
@@ -126,7 +126,7 @@ rules:
     match: {path: "**/payments/**"}
     action: block
 `)
-	s := New(Config{Policy: pol}, discardLogger())
+	s := New(Config{Policies: policy.NewProvider(pol)}, discardLogger())
 	body := `{
 		"messages": [
 			{"role": "assistant", "content": [
@@ -151,7 +151,7 @@ rules:
 }
 
 func TestPathscan_NilPolicyContinues(t *testing.T) {
-	s := New(Config{Policy: nil}, discardLogger())
+	s := New(Config{Policies: nil}, discardLogger())
 	body := `{
 		"messages": [
 			{"role": "assistant", "content": [
@@ -220,7 +220,7 @@ rules:
     match: {path: "**/payments/**"}
     action: warn
 `)
-	s := New(Config{Policy: pol}, discardLogger())
+	s := New(Config{Policies: policy.NewProvider(pol)}, discardLogger())
 	body := `{
 		"messages": [
 			{"role": "assistant", "content": [
@@ -259,7 +259,7 @@ rules:
     match: {path: "**/payments/**"}
     action: block
 `)
-	s := New(Config{Policy: pol}, discardLogger())
+	s := New(Config{Policies: policy.NewProvider(pol)}, discardLogger())
 	body := `{
 		"messages": [
 			{"role": "assistant", "content": [
