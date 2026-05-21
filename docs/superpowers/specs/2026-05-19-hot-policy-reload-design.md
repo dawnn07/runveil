@@ -420,3 +420,17 @@ None. Three deliberate punts documented as out-of-scope in §2:
 - Multi-file policy watching
 - Symlinked policy file behavior
 - Remote policy source (Git/HTTP)
+
+---
+
+## 11. Acceptance Result
+
+**Date:** 2026-05-21
+
+- **Live reload accepted:** Edited `~/.railcore/policy.yaml`; `railcore logs --follow` showed `⟳ policy_reload ... accepted N→M rules` within the debounce window.
+- **New rule fires on next request:** The reloaded rule took effect on the next AI request — `decision=block` observed without restarting the proxy.
+- **Reload rejected on malformed YAML:** Saving invalid YAML produced `⚠ policy_reload ... rejected`; the previously-active policy stayed live and continued enforcing.
+- **Restore re-accepts:** Fixing the YAML produced a fresh `accepted` event.
+- **No lost AI sessions:** The active Claude Code / Cursor connection survived every reload event.
+
+**Status:** Pass. Sub-project #8 done definition §8 satisfied.
