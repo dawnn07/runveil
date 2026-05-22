@@ -2,6 +2,7 @@ package policy
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -30,6 +31,34 @@ rules:
 `
 
 const remoteInvalidYAML = `not: valid: yaml: at: all`
+
+// recordingHandler captures slog messages so tests can assert on WARN
+// output. Mutex-guarded — the poll goroutine logs concurrently.
+type recordingHandler struct {
+	mu       sync.Mutex
+	messages []string
+}
+
+func (h *recordingHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	h.messages = append(h.messages, r.Message)
+	h.mu.Unlock()
+	return nil
+}
+func (h *recordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *recordingHandler) WithGroup(string) slog.Handler      { return h }
+
+func (h *recordingHandler) sawMessage(msg string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, m := range h.messages {
+		if m == msg {
+			return true
+		}
+	}
+	return false
+}
 
 // policyServer is an httptest server that serves a policy body which
 // tests can swap, with ETag support.
@@ -235,11 +264,13 @@ func TestRemoteSource_PollTransportFailureKeepsQuiet(t *testing.T) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
 	t.Cleanup(srv.Close)
+
+	rec := &recordingHandler{}
 	s, _ := NewRemoteSource(RemoteConfig{
 		URL:       srv.URL,
 		Interval:  20 * time.Millisecond,
 		CachePath: filepath.Join(t.TempDir(), "policy-cache.yaml"),
-	}, discardLogger(),
+	}, slog.New(rec),
 		func(*Policy) { t.Error("unexpected accept on 500") },
 		func(error, []byte) { t.Error("unexpected reject on 500") })
 
@@ -248,7 +279,47 @@ func TestRemoteSource_PollTransportFailureKeepsQuiet(t *testing.T) {
 	_ = s.Start(ctx)
 	t.Cleanup(func() { _ = s.Close() })
 
-	time.Sleep(200 * time.Millisecond)
+	// Several poll intervals of 500s — neither callback fires, and the
+	// failure is WARN-logged.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if rec.sawMessage("policy poll failed") {
+			return // success
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("expected a 'policy poll failed' WARN log for the 500 response")
+}
+
+func TestRemoteSource_PollConnectionErrorKeepsQuiet(t *testing.T) {
+	// Start a server, capture its URL, then close it — polls now hit a
+	// dead address, exercising the client.Do transport-error branch.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	deadURL := srv.URL
+	srv.Close()
+
+	rec := &recordingHandler{}
+	s, _ := NewRemoteSource(RemoteConfig{
+		URL:       deadURL,
+		Interval:  20 * time.Millisecond,
+		CachePath: filepath.Join(t.TempDir(), "policy-cache.yaml"),
+	}, slog.New(rec),
+		func(*Policy) { t.Error("unexpected accept on dead URL") },
+		func(error, []byte) { t.Error("unexpected reject on dead URL") })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	_ = s.Start(ctx)
+	t.Cleanup(func() { _ = s.Close() })
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if rec.sawMessage("policy poll failed") {
+			return // success — transport error WARN-logged, no callback fired
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("expected a 'policy poll failed' WARN log for the connection error")
 }
 
 func TestRemoteSource_CloseIdempotent(t *testing.T) {

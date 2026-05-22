@@ -47,6 +47,7 @@ type RemoteSource struct {
 
 	closeOnce sync.Once
 	done      chan struct{}
+	cancel    context.CancelFunc // set by Start, invoked by Close to abort in-flight requests
 	wg        sync.WaitGroup
 }
 
@@ -92,7 +93,7 @@ func NewRemoteSource(cfg RemoteConfig, logger *slog.Logger,
 // Policy. On transport failure or an invalid policy it returns an
 // error. Used for the proxy's cold-start bootstrap.
 func (s *RemoteSource) Fetch() (*Policy, error) {
-	resp, err := s.doRequest()
+	resp, err := s.doRequest(context.Background())
 	if err != nil {
 		return nil, fmt.Errorf("policy: remote fetch: %w", err)
 	}
@@ -121,14 +122,19 @@ func (s *RemoteSource) Fetch() (*Policy, error) {
 // Start launches the background poll goroutine. It returns immediately;
 // the goroutine runs until ctx is cancelled or Close is called.
 func (s *RemoteSource) Start(ctx context.Context) error {
+	runCtx, cancel := context.WithCancel(ctx)
+	s.cancel = cancel
 	s.wg.Add(1)
-	go s.run(ctx)
+	go s.run(runCtx)
 	return nil
 }
 
 // Close stops the poller. Idempotent. Joins the goroutine.
 func (s *RemoteSource) Close() error {
 	s.closeOnce.Do(func() {
+		if s.cancel != nil {
+			s.cancel()
+		}
 		close(s.done)
 		s.wg.Wait()
 	})
@@ -146,7 +152,7 @@ func (s *RemoteSource) run(ctx context.Context) {
 		case <-s.done:
 			return
 		case <-ticker.C:
-			s.poll()
+			s.poll(ctx)
 		}
 	}
 }
@@ -154,8 +160,8 @@ func (s *RemoteSource) run(ctx context.Context) {
 // poll performs one conditional GET and dispatches the result. A 304 or
 // a transport failure is a quiet no-op (the latter WARN-logged); a
 // served-but-invalid policy fires onReject; a valid one fires onAccept.
-func (s *RemoteSource) poll() {
-	resp, err := s.doRequest()
+func (s *RemoteSource) poll(ctx context.Context) {
+	resp, err := s.doRequest(ctx)
 	if err != nil {
 		s.logger.Warn("policy poll failed", "url", s.cfg.URL, "err", err.Error())
 		return
@@ -192,8 +198,8 @@ func (s *RemoteSource) poll() {
 }
 
 // doRequest builds and executes the conditional GET.
-func (s *RemoteSource) doRequest() (*http.Response, error) {
-	req, err := http.NewRequest(http.MethodGet, s.cfg.URL, nil)
+func (s *RemoteSource) doRequest(ctx context.Context) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.cfg.URL, nil)
 	if err != nil {
 		return nil, err
 	}
