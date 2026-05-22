@@ -34,6 +34,11 @@ func runProxy(args []string) {
 	auditMaxSizeMB := fs.Int("audit-max-size-mb", 100, "max audit file size before rotation")
 	auditMaxBackups := fs.Int("audit-max-backups", 5, "rotated audit files to retain")
 	auditMaxAgeDays := fs.Int("audit-max-age-days", 30, "max age in days for rotated audit files")
+	siemURL := fs.String("siem-url", "", "SIEM collector endpoint URL; empty disables SIEM export")
+	siemAuthHeader := fs.String("siem-auth-header", "", "auth header name for SIEM POSTs (value from RAILCORE_SIEM_AUTH env)")
+	siemBatchSize := fs.Int("siem-batch-size", 100, "audit records per SIEM batch")
+	siemFlushInterval := fs.Duration("siem-flush-interval", 5*time.Second, "max age of a partial SIEM batch")
+	siemMaxBufferBatches := fs.Int("siem-max-buffer-batches", 64, "SIEM retry-buffer cap (batches) before drop-oldest")
 	_ = fs.Parse(args)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -57,7 +62,6 @@ func runProxy(args []string) {
 		auditPath = filepath.Join(*dataDir, "audit.log")
 	}
 
-	var auditLogger audit.Logger = audit.NoopLogger{}
 	var auditWriter *audit.Writer
 	if *auditEnabled {
 		w, err := audit.NewWriter(audit.Config{
@@ -71,8 +75,45 @@ func runProxy(args []string) {
 			os.Exit(1)
 		}
 		auditWriter = w
-		auditLogger = w
 		defer func() { _ = auditWriter.Close() }()
+	}
+
+	// Construct the SIEM sink when --siem-url is set.
+	var siemSink *audit.HTTPSink
+	if *siemURL != "" {
+		if *siemAuthHeader != "" && os.Getenv("RAILCORE_SIEM_AUTH") == "" {
+			logger.Warn("siem auth header configured but RAILCORE_SIEM_AUTH is empty")
+		}
+		sink, err := audit.NewHTTPSink(audit.HTTPConfig{
+			URL:              *siemURL,
+			AuthHeader:       *siemAuthHeader,
+			AuthValue:        os.Getenv("RAILCORE_SIEM_AUTH"),
+			BatchSize:        *siemBatchSize,
+			FlushInterval:    *siemFlushInterval,
+			MaxBufferBatches: *siemMaxBufferBatches,
+		}, logger)
+		if err != nil {
+			logger.Error("siem sink init failed", "err", err.Error())
+			os.Exit(1)
+		}
+		siemSink = sink
+		defer func() { _ = siemSink.Close() }()
+	}
+
+	// Assemble the effective audit logger from the live sinks.
+	var auditLogger audit.Logger = audit.NoopLogger{}
+	var sinks []audit.Logger
+	if auditWriter != nil {
+		sinks = append(sinks, auditWriter)
+	}
+	if siemSink != nil {
+		sinks = append(sinks, siemSink)
+	}
+	switch len(sinks) {
+	case 1:
+		auditLogger = sinks[0]
+	case 2:
+		auditLogger = audit.NewMultiLogger(sinks...)
 	}
 
 	loadedPolicy, policyMode, resolvedPath := resolvePolicy(*policyPath, *dataDir, logger)
