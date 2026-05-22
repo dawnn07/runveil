@@ -338,3 +338,17 @@ Sub-project #9 is complete when:
 ## 9. Open questions
 
 None. Items deliberately deferred are documented as out-of-scope in §2: syslog transport, disk-spool replay, vendor envelopes, mTLS, multiple destinations, gzip, backfill.
+
+---
+
+## 11. Acceptance Result
+
+**Date:** 2026-05-21
+
+- **Batched delivery:** AI requests through the proxy produced NDJSON POSTs to the local collector within the flush interval, with `Content-Type: application/x-ndjson`.
+- **Auth header:** the collector saw the configured auth header carrying the `RAILCORE_SIEM_AUTH` value.
+- **Events exported:** a `policy_reload` event reached the collector, not just request records.
+- **Outage resilience:** with the collector down, the proxy logged `siem` backoff WARNs and kept serving requests; on collector restart, buffered batches drained.
+- **Local file intact:** `~/.railcore/audit.log` contained every request made during the test, including those made while the collector was down.
+
+**Status:** Pass. Sub-project #9 done definition §8 satisfied.
