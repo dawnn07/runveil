@@ -221,7 +221,11 @@ func (s *HTTPSink) run() {
 			tryDrain()
 		case <-s.done:
 			// Drain the ingest channel non-blocking, finalize, then
-			// one best-effort delivery pass.
+			// one best-effort delivery pass. A Log call already past
+			// its closed.Load() guard but not yet at the channel send
+			// can land after this loop exits; that record is dropped
+			// from the SIEM feed (intentional — the file Writer still
+			// has it; the SIEM sink is best-effort live delivery).
 		drainLoop:
 			for {
 				select {
