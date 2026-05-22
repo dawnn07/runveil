@@ -306,3 +306,43 @@ func TestHTTPSink_CloseIdempotent(t *testing.T) {
 		t.Errorf("second Close: %v", err)
 	}
 }
+
+func TestHTTPSink_CloseBoundedWhenSIEMDead(t *testing.T) {
+	// SIEM hangs every request well past the Timeout. With a full retry
+	// buffer, Close must still return within roughly one Timeout budget,
+	// not Timeout * len(retryBuffer).
+	siem := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(10 * time.Second)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer siem.Close()
+
+	cfg := fastConfig(siem.URL)
+	cfg.BatchSize = 1 // every record becomes its own batch
+	cfg.MaxBufferBatches = 50
+	cfg.Timeout = 300 * time.Millisecond
+	cfg.BaseBackoff = time.Hour // park the retry timer
+	s, err := NewHTTPSink(cfg, discardLogger())
+	if err != nil {
+		t.Fatalf("NewHTTPSink: %v", err)
+	}
+
+	// Fill the retry buffer with many batches.
+	for i := 0; i < 50; i++ {
+		s.Log(Record{RequestID: "r"})
+	}
+	// Give the goroutine a moment to finalize batches into retryBuffer.
+	time.Sleep(200 * time.Millisecond)
+
+	start := time.Now()
+	if err := s.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	elapsed := time.Since(start)
+	// Total final-drain budget is cfg.Timeout (300ms). Allow generous
+	// slack for one in-flight POST + scheduling: must be well under the
+	// unbounded worst case (50 * 300ms = 15s).
+	if elapsed > 3*time.Second {
+		t.Errorf("Close took %v; expected bounded shutdown (<3s)", elapsed)
+	}
+}

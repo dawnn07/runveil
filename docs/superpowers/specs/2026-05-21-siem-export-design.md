@@ -144,7 +144,7 @@ select:
 
 - **`finalize()`** — join `current` with `\n` into one NDJSON body (trailing `\n`), append the body to `retryBuffer`, reset `current = nil`. If `len(retryBuffer) > MaxBufferBatches`: drop `retryBuffer[0]`, `WARN "siem retry buffer full; dropping oldest batch"`, increment a dropped counter.
 - **`tryDrain()`** — while `retryBuffer` non-empty: POST `retryBuffer[0]`; on 2xx pop it and reset `backoff = BaseBackoff`; on non-2xx/transport-error stop, `retryTimer.Reset(backoff)`, then `backoff = min(backoff*2, 60s)`.
-- **`finalDrain()`** on Close — one pass over `retryBuffer`, each POST bounded by `Timeout`; whatever still fails is dropped with a logged count. `Close` blocks at most `len(retryBuffer) × Timeout`.
+- **`finalDrain()`** on Close — one pass over `retryBuffer` bounded by a total `Timeout` budget (a shared context deadline); once the budget is spent the remaining batches are dropped with a logged count. `Close` blocks at most ~`Timeout`, not `len(retryBuffer) × Timeout`.
 
 ### 4.5 The POST
 
@@ -266,7 +266,7 @@ When `--siem-url` is unset, `auditLogger` is the file `Writer` alone — identic
 | `json.Marshal` of a Record/Event fails | Skip that line, ERROR logged, continue. (Effectively impossible for these structs.) |
 | `Log`/`Event` after `Close` | No-op (`closed.Load()` guard). No panic. |
 | `Close()` called twice | Idempotent via `closeOnce`. |
-| Shutdown with batches buffered | `Close()` runs `finalDrain()` — one best-effort pass, each POST bounded by `Timeout`. Undeliverable batches dropped with a logged count. `Close` blocks at most `len(retryBuffer) × Timeout`. |
+| Shutdown with batches buffered | `Close()` runs `finalDrain()` — one best-effort pass bounded by a total budget of `Timeout`. Once the budget is exhausted the remaining batches are dropped with a logged count. `Close` blocks at most ~`Timeout` (plus one in-flight POST), not `len(retryBuffer) × Timeout`. |
 | SIEM down for the whole proxy lifetime | `retryBuffer` saturates at `MaxBufferBatches`, steady-state drop-oldest. Proxy serves traffic normally. The local `audit.log` has every record — no audit data lost to disk. |
 
 **Invariant:** the SIEM sink can never block request handling or crash the proxy. Every failure path degrades to "log a WARN, keep serving, the file is still complete."

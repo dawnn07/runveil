@@ -2,6 +2,7 @@ package audit
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -237,12 +238,25 @@ func (s *HTTPSink) run() {
 	}
 }
 
-// finalDrain makes one delivery pass over the retry buffer on shutdown.
-// Undeliverable batches are dropped with a logged count.
+// finalDrain makes one best-effort delivery pass over the retry buffer
+// on shutdown, bounded by a total time budget of cfg.Timeout. Once the
+// budget is exhausted, the remaining batches are dropped. Undeliverable
+// or skipped batches are reported with a logged count.
 func (s *HTTPSink) finalDrain(retryBuffer [][]byte) {
+	if len(retryBuffer) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.Timeout)
+	defer cancel()
+
 	dropped := 0
-	for _, body := range retryBuffer {
-		if err := s.post(body); err != nil {
+	for i, body := range retryBuffer {
+		if ctx.Err() != nil {
+			// Budget exhausted — drop every remaining batch.
+			dropped += len(retryBuffer) - i
+			break
+		}
+		if err := s.postCtx(ctx, body); err != nil {
 			dropped++
 		}
 	}
@@ -251,10 +265,19 @@ func (s *HTTPSink) finalDrain(retryBuffer [][]byte) {
 	}
 }
 
-// post sends one NDJSON batch body. Returns an error on transport
-// failure or a non-2xx status.
+// post sends one NDJSON batch body using the background context. Used
+// by the steady-state drain path, where the per-POST bound is
+// http.Client.Timeout.
 func (s *HTTPSink) post(body []byte) error {
-	req, err := http.NewRequest(http.MethodPost, s.cfg.URL, bytes.NewReader(body))
+	return s.postCtx(context.Background(), body)
+}
+
+// postCtx sends one NDJSON batch body under the given context. Returns
+// an error on transport failure, context cancellation, or a non-2xx
+// status. The per-POST bound is the smaller of http.Client.Timeout and
+// the context deadline.
+func (s *HTTPSink) postCtx(ctx context.Context, body []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.cfg.URL, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
