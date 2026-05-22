@@ -136,3 +136,54 @@ func TestNoopLogger_EventIsSafe(t *testing.T) {
 		l.Event(Event{Kind: "policy_reload"})
 	}
 }
+
+func TestRecord_MarshalJSON_IncludesUserMachine(t *testing.T) {
+	r := Record{
+		Time:      time.Now(),
+		RequestID: "r1",
+		Decision:  "continue",
+		User:      "alice@corp.com",
+		Machine:   "alice-mbp",
+	}
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	for _, want := range []string{`"user":"alice@corp.com"`, `"machine":"alice-mbp"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+}
+
+func TestRecord_MarshalJSON_OmitsEmptyUserMachine(t *testing.T) {
+	r := Record{Time: time.Now(), RequestID: "r1", Decision: "continue"}
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	if strings.Contains(s, `"user"`) || strings.Contains(s, `"machine"`) {
+		t.Errorf("empty user/machine should be omitted; got %s", s)
+	}
+}
+
+func TestEvent_MarshalJSON_IncludesUserMachine(t *testing.T) {
+	e := Event{
+		Time:    time.Now(),
+		Kind:    "policy_reload",
+		User:    "bob@corp.com",
+		Machine: "bob-x1",
+	}
+	data, err := json.Marshal(e)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	s := string(data)
+	for _, want := range []string{`"user":"bob@corp.com"`, `"machine":"bob-x1"`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+}

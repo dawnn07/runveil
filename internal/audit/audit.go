@@ -28,6 +28,8 @@ import (
 //	endpoint     optional; "chat.completions" | "messages"
 //	decision     "continue" | "block"
 //	findings     optional; per-detector findings serialized via their own MarshalJSON
+//	user         optional; developer identity (OS username or override)
+//	machine      optional; hostname
 type Record struct {
 	Time       time.Time `json:"time"`
 	RequestID  string    `json:"request_id"`
@@ -43,6 +45,9 @@ type Record struct {
 	Endpoint string `json:"endpoint,omitempty"`
 	Decision string `json:"decision"`
 	Findings []any  `json:"findings,omitempty"`
+
+	User    string `json:"user,omitempty"`    // developer identity
+	Machine string `json:"machine,omitempty"` // hostname
 }
 
 // Event is a synthetic (non-request) audit record. Currently used for
@@ -61,6 +66,8 @@ type Record struct {
 //	              zero — also omitted on rejection)
 //	error         the validation error string (omitempty — only set on
 //	              rejection)
+//	user          optional; developer identity (OS username or override)
+//	machine       optional; hostname
 type Event struct {
 	Time        time.Time `json:"time"`
 	Kind        string    `json:"kind"`
@@ -69,6 +76,9 @@ type Event struct {
 	RulesBefore int       `json:"rules_before,omitempty"`
 	RulesAfter  int       `json:"rules_after,omitempty"`
 	Error       string    `json:"error,omitempty"`
+
+	User    string `json:"user,omitempty"`    // developer identity
+	Machine string `json:"machine,omitempty"` // hostname
 }
 
 // Logger is the consumer-facing interface. Proxy holds a Logger (never
