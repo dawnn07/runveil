@@ -16,3 +16,6 @@ coverage.txt
 .vscode/
 .idea/
 *.swp
+
+# Internal planning artifacts (brainstorming specs + implementation plans)
+docs/superpowers/
