@@ -121,3 +121,42 @@ func TestLineIsEvent(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatRecord_RendersUser(t *testing.T) {
+	r := audit.Record{
+		Time:     time.Date(2026, 5, 22, 9, 14, 2, 0, time.UTC),
+		Host:     "api.anthropic.com",
+		Method:   "POST",
+		Path:     "/v1/messages",
+		Status:   200,
+		Decision: "continue",
+		User:     "alice@corp.com",
+	}
+	got := formatRecord(r)
+	if !strings.Contains(got, "user=alice@corp.com") {
+		t.Errorf("formatRecord missing user= token:\n%s", got)
+	}
+}
+
+func TestFormatRecord_OmitsUserWhenEmpty(t *testing.T) {
+	r := audit.Record{
+		Time:     time.Date(2026, 5, 22, 9, 14, 2, 0, time.UTC),
+		Host:     "api.anthropic.com",
+		Method:   "POST",
+		Path:     "/v1/messages",
+		Status:   200,
+		Decision: "continue",
+	}
+	got := formatRecord(r)
+	if strings.Contains(got, "user=") {
+		t.Errorf("formatRecord should omit user= when empty:\n%s", got)
+	}
+}
+
+func TestFormatEvent_RendersUser(t *testing.T) {
+	line := []byte(`{"time":"2026-05-22T09:15:30Z","kind":"policy_reload","policy_path":"/x/policy.yaml","outcome":"accepted","rules_before":2,"rules_after":3,"user":"bob@corp.com"}`)
+	got := formatEvent(line)
+	if !strings.Contains(got, "user=bob@corp.com") {
+		t.Errorf("formatEvent missing user= token:\n%s", got)
+	}
+}

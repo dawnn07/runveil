@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	osuser "os/user"
 	"path/filepath"
 	"syscall"
 	"time"
@@ -39,6 +40,8 @@ func runProxy(args []string) {
 	siemBatchSize := fs.Int("siem-batch-size", 100, "audit records per SIEM batch")
 	siemFlushInterval := fs.Duration("siem-flush-interval", 5*time.Second, "max age of a partial SIEM batch")
 	siemMaxBufferBatches := fs.Int("siem-max-buffer-batches", 64, "SIEM retry-buffer cap (batches) before drop-oldest")
+	identityFlag := fs.String("identity", "",
+		"developer identity for audit records (default: OS username; RAILCORE_IDENTITY env also honored)")
 	_ = fs.Parse(args)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -115,6 +118,14 @@ func runProxy(args []string) {
 	case 2:
 		auditLogger = audit.NewMultiLogger(sinks...)
 	}
+
+	// Stamp every record/event with the developer identity. Wrapping is
+	// unconditional — even a NoopLogger gets wrapped harmlessly. This
+	// must happen before the policy watcher is built, since the
+	// watcher's callbacks capture auditLogger.
+	identity := detectIdentity(*identityFlag)
+	auditLogger = audit.NewIdentityLogger(auditLogger, identity)
+	logger.Info("audit identity", "user", identity.User, "machine", identity.Machine)
 
 	loadedPolicy, policyMode, resolvedPath := resolvePolicy(*policyPath, *dataDir, logger)
 
@@ -246,4 +257,23 @@ func resolvePolicy(flagPath, dataDir string, logger *slog.Logger) (*policy.Polic
 		os.Exit(1)
 	}
 	return p, "file", defaultPath
+}
+
+// detectIdentity resolves the developer identity stamped onto audit
+// records. Precedence for the user: --identity flag, then the
+// RAILCORE_IDENTITY env var, then the OS username. machine is always
+// the hostname. Any source may fail to a "" value, which is dropped
+// from the audit record by omitempty.
+func detectIdentity(flagVal string) audit.Identity {
+	name := flagVal
+	if name == "" {
+		name = os.Getenv("RAILCORE_IDENTITY")
+	}
+	if name == "" {
+		if u, err := osuser.Current(); err == nil {
+			name = u.Username
+		}
+	}
+	machine, _ := os.Hostname()
+	return audit.Identity{User: name, Machine: machine}
 }

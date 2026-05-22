@@ -160,6 +160,9 @@ func formatRecord(r audit.Record) string {
 		ruleNames := extractRuleNames(r.Findings)
 		base += fmt.Sprintf("  findings=%d [%s]", len(r.Findings), strings.Join(ruleNames, ","))
 	}
+	if r.User != "" {
+		base += "  user=" + r.User
+	}
 	return base
 }
 
@@ -246,13 +249,19 @@ func formatEvent(raw []byte) string {
 		return ""
 	}
 	hhmmss := e.Time.Format("15:04:05")
-	if e.Kind != "policy_reload" {
-		return fmt.Sprintf("%s  %s  %s", hhmmss, e.Kind, e.PolicyPath)
-	}
-	if e.Outcome == "accepted" {
-		return fmt.Sprintf("%s  ⟳  policy_reload  %s  accepted  %d→%d rules",
+	var line string
+	switch {
+	case e.Kind != "policy_reload":
+		line = fmt.Sprintf("%s  %s  %s", hhmmss, e.Kind, e.PolicyPath)
+	case e.Outcome == "accepted":
+		line = fmt.Sprintf("%s  ⟳  policy_reload  %s  accepted  %d→%d rules",
 			hhmmss, e.PolicyPath, e.RulesBefore, e.RulesAfter)
+	default:
+		line = fmt.Sprintf("%s  ⚠  policy_reload  %s  rejected  rules_before=%d  err='%s'",
+			hhmmss, e.PolicyPath, e.RulesBefore, e.Error)
 	}
-	return fmt.Sprintf("%s  ⚠  policy_reload  %s  rejected  rules_before=%d  err='%s'",
-		hhmmss, e.PolicyPath, e.RulesBefore, e.Error)
+	if e.User != "" {
+		line += "  user=" + e.User
+	}
+	return line
 }
