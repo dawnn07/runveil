@@ -46,6 +46,12 @@ func runProxy(args []string) {
 		"developer identity for audit records (default: OS username; RAILCORE_IDENTITY env also honored)")
 	metricsPort := fs.Int("metrics-port", 0,
 		"port for the Prometheus /metrics endpoint (0 = disabled; e.g. 9464)")
+	policyURL := fs.String("policy-url", "",
+		"fetch policy from this HTTP(S) URL instead of a local file (control-plane mode)")
+	policyURLInterval := fs.Duration("policy-url-interval", 30*time.Second,
+		"how often to poll --policy-url for changes")
+	policyURLAuthHeader := fs.String("policy-url-auth-header", "",
+		"auth header name for --policy-url requests (value from RAILCORE_POLICY_TOKEN env)")
 	_ = fs.Parse(args)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -141,16 +147,51 @@ func runProxy(args []string) {
 	auditLogger = audit.NewIdentityLogger(auditLogger, identity)
 	logger.Info("audit identity", "user", identity.User, "machine", identity.Machine)
 
-	loadedPolicy, policyMode, resolvedPath := resolvePolicy(*policyPath, *dataDir, logger)
-
-	effectiveBlock := *blockOnDetect || os.Getenv("RAILCORE_BLOCK_ON_DETECT") == "1"
-	if loadedPolicy != nil && effectiveBlock {
-		logger.Warn("--block-on-detect ignored because a policy file is in effect",
-			"policy_path", resolvedPath)
+	// --- Policy source selection: local file (default) or remote URL. ---
+	if *policyURL != "" && *policyPath != "" {
+		logger.Error("--policy and --policy-url are mutually exclusive; choose one source")
+		os.Exit(1)
 	}
 
+	effectiveBlock := *blockOnDetect || os.Getenv("RAILCORE_BLOCK_ON_DETECT") == "1"
+
 	chain := pipeline.NewChain().WithLogger(logger)
-	policies := policy.NewProvider(loadedPolicy)
+
+	// policies holds the live policy; policyMode/policySource describe
+	// where it came from (for the startup log and reload events).
+	var policies *policy.Provider
+	var policyMode string
+	var policySource string
+
+	// Shared reload callbacks for whichever source is active. They
+	// capture `policies` and `policySource`; both are assigned before
+	// any source's poll/watch goroutine is started.
+	onAccept := func(np *policy.Policy) {
+		before := policies.Get().RuleCount()
+		policies.Set(np)
+		auditLogger.Event(audit.Event{
+			Time:        time.Now(),
+			Kind:        "policy_reload",
+			PolicyPath:  policySource,
+			Outcome:     "accepted",
+			RulesBefore: before,
+			RulesAfter:  np.RuleCount(),
+		})
+		logger.Info("policy reloaded", "source", policySource,
+			"rules_before", before, "rules_after", np.RuleCount())
+	}
+	onReject := func(rerr error, _ []byte) {
+		before := policies.Get().RuleCount()
+		auditLogger.Event(audit.Event{
+			Time:        time.Now(),
+			Kind:        "policy_reload",
+			PolicyPath:  policySource,
+			Outcome:     "rejected",
+			RulesBefore: before,
+			Error:       rerr.Error(),
+		})
+		logger.Warn("policy reload rejected", "source", policySource, "err", rerr.Error())
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -169,51 +210,68 @@ func runProxy(args []string) {
 		logger.Info("metrics endpoint listening", "addr", metricsAddr, "path", "/metrics")
 	}
 
-	// Hot reload: watch the resolved policy file. If no policy was
-	// loaded at startup (resolvedPath==""), skip — there's nothing to
-	// watch and reload will need a restart anyway.
-	if resolvedPath != "" {
-		watcher, werr := policy.NewWatcher(resolvedPath, logger,
-			func(np *policy.Policy) {
-				before := policies.Get().RuleCount()
-				policies.Set(np)
-				auditLogger.Event(audit.Event{
-					Time:        time.Now(),
-					Kind:        "policy_reload",
-					PolicyPath:  resolvedPath,
-					Outcome:     "accepted",
-					RulesBefore: before,
-					RulesAfter:  np.RuleCount(),
-				})
-				logger.Info("policy reloaded",
-					"path", resolvedPath,
-					"rules_before", before,
-					"rules_after", np.RuleCount())
-			},
-			func(rerr error, _ []byte) {
-				before := policies.Get().RuleCount()
-				auditLogger.Event(audit.Event{
-					Time:        time.Now(),
-					Kind:        "policy_reload",
-					PolicyPath:  resolvedPath,
-					Outcome:     "rejected",
-					RulesBefore: before,
-					Error:       rerr.Error(),
-				})
-				logger.Warn("policy reload rejected",
-					"path", resolvedPath,
-					"err", rerr.Error())
-			},
-		)
-		if werr != nil {
-			logger.Error("policy watcher init failed", "err", werr.Error())
+	if *policyURL != "" {
+		// --- Remote mode: fetch policy from the URL, poll for updates. ---
+		policyMode = "url"
+		policySource = *policyURL
+		cachePath := filepath.Join(*dataDir, "policy-cache.yaml")
+		if *policyURLAuthHeader != "" && os.Getenv("RAILCORE_POLICY_TOKEN") == "" {
+			logger.Warn("policy URL auth header configured but RAILCORE_POLICY_TOKEN is empty")
+		}
+		src, serr := policy.NewRemoteSource(policy.RemoteConfig{
+			URL:        *policyURL,
+			AuthHeader: *policyURLAuthHeader,
+			AuthValue:  os.Getenv("RAILCORE_POLICY_TOKEN"),
+			Interval:   *policyURLInterval,
+			CachePath:  cachePath,
+		}, logger, onAccept, onReject)
+		if serr != nil {
+			logger.Error("policy URL invalid", "err", serr.Error())
 			os.Exit(1)
 		}
-		if werr := watcher.Start(ctx); werr != nil {
-			logger.Error("policy watcher start failed", "err", werr.Error())
+		initial, ferr := src.Fetch()
+		if ferr != nil {
+			cached, cerr := policy.LoadFromFile(cachePath)
+			if cerr != nil {
+				logger.Error("policy URL unreachable and no cache available",
+					"url", *policyURL, "cache", cachePath,
+					"url_err", ferr.Error(), "cache_err", cerr.Error())
+				os.Exit(1)
+			}
+			initial = cached
+			logger.Warn("policy URL unreachable at startup; loaded cached policy",
+				"url", *policyURL, "cache", cachePath, "err", ferr.Error())
+		} else {
+			logger.Info("policy loaded from URL", "url", *policyURL, "rules", initial.RuleCount())
+		}
+		policies = policy.NewProvider(initial)
+		if err := src.Start(ctx); err != nil {
+			logger.Error("policy poller start failed", "err", err.Error())
 			os.Exit(1)
 		}
-		defer func() { _ = watcher.Close() }()
+		defer func() { _ = src.Close() }()
+	} else {
+		// --- File mode: load the policy file, watch it for changes. ---
+		loadedPolicy, mode, resolvedPath := resolvePolicy(*policyPath, *dataDir, logger)
+		policyMode = mode
+		policySource = resolvedPath
+		policies = policy.NewProvider(loadedPolicy)
+		if loadedPolicy != nil && effectiveBlock {
+			logger.Warn("--block-on-detect ignored because a policy file is in effect",
+				"policy_path", resolvedPath)
+		}
+		if resolvedPath != "" {
+			watcher, werr := policy.NewWatcher(resolvedPath, logger, onAccept, onReject)
+			if werr != nil {
+				logger.Error("policy watcher init failed", "err", werr.Error())
+				os.Exit(1)
+			}
+			if werr := watcher.Start(ctx); werr != nil {
+				logger.Error("policy watcher start failed", "err", werr.Error())
+				os.Exit(1)
+			}
+			defer func() { _ = watcher.Close() }()
+		}
 	}
 
 	chain.Register(pathscan.New(pathscan.Config{Policies: policies}, logger))
@@ -244,8 +302,9 @@ func runProxy(args []string) {
 		"policy_mode", policyMode,
 		"block_on_detect", effectiveBlock,
 	}
-	if resolvedPath != "" {
-		startupArgs = append(startupArgs, "policy_path", resolvedPath, "rules", len(loadedPolicy.Rules))
+	if policySource != "" {
+		startupArgs = append(startupArgs, "policy_source", policySource,
+			"rules", policies.Get().RuleCount())
 	}
 	logger.Info("railcore proxy listening", startupArgs...)
 
