@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	osuser "os/user"
@@ -16,6 +17,7 @@ import (
 
 	"railcore/internal/audit"
 	"railcore/internal/ca"
+	"railcore/internal/metrics"
 	"railcore/internal/pipeline"
 	"railcore/internal/policy"
 	"railcore/internal/proxy"
@@ -42,6 +44,8 @@ func runProxy(args []string) {
 	siemMaxBufferBatches := fs.Int("siem-max-buffer-batches", 64, "SIEM retry-buffer cap (batches) before drop-oldest")
 	identityFlag := fs.String("identity", "",
 		"developer identity for audit records (default: OS username; RAILCORE_IDENTITY env also honored)")
+	metricsPort := fs.Int("metrics-port", 0,
+		"port for the Prometheus /metrics endpoint (0 = disabled; e.g. 9464)")
 	_ = fs.Parse(args)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -104,6 +108,11 @@ func runProxy(args []string) {
 	}
 
 	// Assemble the effective audit logger from the live sinks.
+	var metricsCollector *metrics.Collector
+	if *metricsPort != 0 {
+		metricsCollector = metrics.NewCollector()
+	}
+
 	var auditLogger audit.Logger = audit.NoopLogger{}
 	var sinks []audit.Logger
 	if auditWriter != nil {
@@ -112,10 +121,15 @@ func runProxy(args []string) {
 	if siemSink != nil {
 		sinks = append(sinks, siemSink)
 	}
+	if metricsCollector != nil {
+		sinks = append(sinks, metricsCollector)
+	}
 	switch len(sinks) {
+	case 0:
+		// auditLogger stays NoopLogger
 	case 1:
 		auditLogger = sinks[0]
-	case 2:
+	default:
 		auditLogger = audit.NewMultiLogger(sinks...)
 	}
 
@@ -140,6 +154,20 @@ func runProxy(args []string) {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if metricsCollector != nil {
+		metricsAddr := fmt.Sprintf("127.0.0.1:%d", *metricsPort)
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", metricsCollector.Handler())
+		metricsSrv := &http.Server{Addr: metricsAddr, Handler: mux}
+		go func() {
+			if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("metrics server failed", "err", err.Error())
+			}
+		}()
+		defer func() { _ = metricsSrv.Close() }()
+		logger.Info("metrics endpoint listening", "addr", metricsAddr, "path", "/metrics")
+	}
 
 	// Hot reload: watch the resolved policy file. If no policy was
 	// loaded at startup (resolvedPath==""), skip — there's nothing to
