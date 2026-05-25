@@ -5,6 +5,7 @@ package audit
 type Identity struct {
 	User    string // developer identity — OS username or a configured override
 	Machine string // hostname
+	OrgID   string // control-plane org id from enrollment ("" when unenrolled)
 }
 
 // IdentityLogger decorates a Logger, stamping a fixed Identity onto
@@ -33,6 +34,7 @@ func (l *IdentityLogger) Log(r Record) {
 	}
 	r.User = l.identity.User
 	r.Machine = l.identity.Machine
+	r.OrgID = l.identity.OrgID
 	l.inner.Log(r)
 }
 
@@ -43,5 +45,6 @@ func (l *IdentityLogger) Event(e Event) {
 	}
 	e.User = l.identity.User
 	e.Machine = l.identity.Machine
+	e.OrgID = l.identity.OrgID
 	l.inner.Event(e)
 }

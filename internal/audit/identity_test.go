@@ -58,3 +58,33 @@ func TestIdentityLogger_NilInnerIsSafe(t *testing.T) {
 	l.Log(Record{RequestID: "r1"})
 	l.Event(Event{Kind: "policy_reload"})
 }
+
+func TestIdentityLogger_StampsOrgIDOnRecord(t *testing.T) {
+	fake := &fakeLogger{}
+	l := NewIdentityLogger(fake, Identity{User: "alice", Machine: "alice-mbp", OrgID: "org_x"})
+	l.Log(Record{RequestID: "r1", Decision: "continue"})
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.records) != 1 {
+		t.Fatalf("got %d records, want 1", len(fake.records))
+	}
+	if got := fake.records[0].OrgID; got != "org_x" {
+		t.Errorf("OrgID stamped = %q, want org_x", got)
+	}
+}
+
+func TestIdentityLogger_StampsOrgIDOnEvent(t *testing.T) {
+	fake := &fakeLogger{}
+	l := NewIdentityLogger(fake, Identity{User: "bob", Machine: "bob-x1", OrgID: "org_y"})
+	l.Event(Event{Kind: "policy_reload"})
+
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.events) != 1 {
+		t.Fatalf("got %d events, want 1", len(fake.events))
+	}
+	if got := fake.events[0].OrgID; got != "org_y" {
+		t.Errorf("OrgID stamped = %q, want org_y", got)
+	}
+}
