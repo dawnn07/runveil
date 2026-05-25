@@ -156,6 +156,7 @@ rules:
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
+	t.Cleanup(func() { _ = ln.Close() })
 	go srv.Serve(ctx, ln)
 
 	// --- Make a proxied HTTPS request through the agent. ---
