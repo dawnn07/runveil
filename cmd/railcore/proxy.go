@@ -75,11 +75,7 @@ func runProxy(args []string) {
 		logger.Error("enrollment load failed", "err", err.Error())
 		os.Exit(1)
 	}
-	if enr.OrgID != "" {
-		logger.Info("audit enrollment", "org_id", enr.OrgID, "enrolled", true)
-	} else {
-		logger.Info("audit enrollment", "enrolled", false)
-	}
+	logger.Info("audit enrollment", "org_id", enr.OrgID, "enrolled", !enr.IsZero())
 
 	// Resolve audit log path.
 	auditPath := *auditLog
