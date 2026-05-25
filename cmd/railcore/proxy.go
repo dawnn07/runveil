@@ -75,7 +75,11 @@ func runProxy(args []string) {
 		logger.Error("enrollment load failed", "err", err.Error())
 		os.Exit(1)
 	}
-	logger.Info("audit enrollment", "org_id", enr.OrgID, "enrolled", !enr.IsZero())
+	if enr.OrgID != "" {
+		logger.Info("audit enrollment", "org_id", enr.OrgID, "enrolled", true)
+	} else {
+		logger.Info("audit enrollment", "enrolled", false)
+	}
 
 	// Resolve audit log path.
 	auditPath := *auditLog
@@ -235,7 +239,7 @@ func runProxy(args []string) {
 			logger.Debug("RAILCORE_POLICY_TOKEN overrides device token for policy URL")
 		}
 		if *policyURLAuthHeader != "" && authValue == "" {
-			logger.Warn("policy URL auth header configured but no token available (set RAILCORE_DEVICE_TOKEN, enroll via device.json, or set RAILCORE_POLICY_TOKEN)")
+			logger.Warn("policy URL auth header configured but no token available (set RAILCORE_ORG_ID + RAILCORE_DEVICE_TOKEN, enroll via device.json, or set RAILCORE_POLICY_TOKEN)")
 		}
 		src, serr := policy.NewRemoteSource(policy.RemoteConfig{
 			URL:        *policyURL,
