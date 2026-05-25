@@ -187,3 +187,39 @@ func TestEvent_MarshalJSON_IncludesUserMachine(t *testing.T) {
 		}
 	}
 }
+
+func TestRecord_MarshalJSON_IncludesOrgID(t *testing.T) {
+	r := Record{
+		Time:      time.Now(),
+		RequestID: "r1",
+		Decision:  "continue",
+		OrgID:     "org_acme",
+	}
+	data, err := json.Marshal(r)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if !strings.Contains(string(data), `"org_id":"org_acme"`) {
+		t.Errorf("missing org_id in:\n%s", data)
+	}
+}
+
+func TestRecord_MarshalJSON_OmitsEmptyOrgID(t *testing.T) {
+	r := Record{Time: time.Now(), RequestID: "r1", Decision: "continue"}
+	data, _ := json.Marshal(r)
+	if strings.Contains(string(data), `"org_id"`) {
+		t.Errorf("empty org_id should be omitted; got %s", data)
+	}
+}
+
+func TestEvent_MarshalJSON_IncludesOrgID(t *testing.T) {
+	e := Event{
+		Time:  time.Now(),
+		Kind:  "policy_reload",
+		OrgID: "org_acme",
+	}
+	data, _ := json.Marshal(e)
+	if !strings.Contains(string(data), `"org_id":"org_acme"`) {
+		t.Errorf("missing org_id in event:\n%s", data)
+	}
+}

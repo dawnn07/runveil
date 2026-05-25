@@ -48,6 +48,7 @@ type Record struct {
 
 	User    string `json:"user,omitempty"`    // developer identity
 	Machine string `json:"machine,omitempty"` // hostname
+	OrgID   string `json:"org_id,omitempty"`  // control-plane org id (from enrollment)
 }
 
 // Event is a synthetic (non-request) audit record. Currently used for
@@ -79,6 +80,7 @@ type Event struct {
 
 	User    string `json:"user,omitempty"`    // developer identity
 	Machine string `json:"machine,omitempty"` // hostname
+	OrgID   string `json:"org_id,omitempty"`  // control-plane org id (from enrollment)
 }
 
 // Logger is the consumer-facing interface. Proxy holds a Logger (never
