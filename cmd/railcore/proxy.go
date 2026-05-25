@@ -17,6 +17,7 @@ import (
 
 	"railcore/internal/audit"
 	"railcore/internal/ca"
+	"railcore/internal/enrollment"
 	"railcore/internal/metrics"
 	"railcore/internal/pipeline"
 	"railcore/internal/policy"
@@ -68,6 +69,13 @@ func runProxy(args []string) {
 			"err", err.Error(),
 			"manual_steps", trust.ManualInstructions(caInst.RootPath()))
 	}
+
+	enr, err := enrollment.Load(*dataDir)
+	if err != nil {
+		logger.Error("enrollment load failed", "err", err.Error())
+		os.Exit(1)
+	}
+	logger.Info("audit enrollment", "org_id", enr.OrgID, "enrolled", !enr.IsZero())
 
 	// Resolve audit log path.
 	auditPath := *auditLog
@@ -144,8 +152,9 @@ func runProxy(args []string) {
 	// must happen before the policy watcher is built, since the
 	// watcher's callbacks capture auditLogger.
 	identity := detectIdentity(*identityFlag)
+	identity.OrgID = enr.OrgID
 	auditLogger = audit.NewIdentityLogger(auditLogger, identity)
-	logger.Info("audit identity", "user", identity.User, "machine", identity.Machine)
+	logger.Info("audit identity", "user", identity.User, "machine", identity.Machine, "org_id", identity.OrgID)
 
 	// --- Policy source selection: local file (default) or remote URL. ---
 	if *policyURL != "" && *policyPath != "" {
@@ -215,13 +224,23 @@ func runProxy(args []string) {
 		policyMode = "url"
 		policySource = *policyURL
 		cachePath := filepath.Join(*dataDir, "policy-cache.yaml")
-		if *policyURLAuthHeader != "" && os.Getenv("RAILCORE_POLICY_TOKEN") == "" {
-			logger.Warn("policy URL auth header configured but RAILCORE_POLICY_TOKEN is empty")
+
+		// Auth value precedence: RAILCORE_POLICY_TOKEN (per-endpoint
+		// override) wins; otherwise fall back to the enrollment device
+		// token; otherwise empty (no auth header is sent).
+		authValue := os.Getenv("RAILCORE_POLICY_TOKEN")
+		if authValue == "" {
+			authValue = enr.DeviceToken
+		} else if enr.DeviceToken != "" {
+			logger.Debug("RAILCORE_POLICY_TOKEN overrides device token for policy URL")
+		}
+		if *policyURLAuthHeader != "" && authValue == "" {
+			logger.Warn("policy URL auth header configured but no token available (set RAILCORE_DEVICE_TOKEN, enroll via device.json, or set RAILCORE_POLICY_TOKEN)")
 		}
 		src, serr := policy.NewRemoteSource(policy.RemoteConfig{
 			URL:        *policyURL,
 			AuthHeader: *policyURLAuthHeader,
-			AuthValue:  os.Getenv("RAILCORE_POLICY_TOKEN"),
+			AuthValue:  authValue,
 			Interval:   *policyURLInterval,
 			CachePath:  cachePath,
 		}, logger, onAccept, onReject)
