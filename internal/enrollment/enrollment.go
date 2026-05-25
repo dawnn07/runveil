@@ -4,6 +4,8 @@
 // valid state and means the agent runs as a pure local proxy.
 package enrollment
 
+import "os"
+
 // Enrollment is the agent's control-plane identity, captured once at
 // startup. A zero Enrollment means the agent is unenrolled.
 type Enrollment struct {
@@ -21,5 +23,8 @@ func (e Enrollment) IsZero() bool {
 // when no source is configured. A malformed or unreadable file is a
 // hard error: the operator clearly meant to enroll.
 func Load(dataDir string) (Enrollment, error) {
+	if orgID, token := os.Getenv("RAILCORE_ORG_ID"), os.Getenv("RAILCORE_DEVICE_TOKEN"); orgID != "" && token != "" {
+		return Enrollment{OrgID: orgID, DeviceToken: token}, nil
+	}
 	return Enrollment{}, nil
 }
