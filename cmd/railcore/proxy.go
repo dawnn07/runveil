@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
@@ -53,6 +55,10 @@ func runProxy(args []string) {
 		"how often to poll --policy-url for changes")
 	policyURLAuthHeader := fs.String("policy-url-auth-header", "",
 		"auth header name for --policy-url requests (value from RAILCORE_POLICY_TOKEN env)")
+	upstreamOverride := fs.String("upstream-override", os.Getenv("RAILCORE_UPSTREAM_OVERRIDE"),
+		"redirect every upstream TLS dial to this host:port (test/staging only; overrides RAILCORE_UPSTREAM_OVERRIDE)")
+	upstreamCA := fs.String("upstream-ca", os.Getenv("RAILCORE_UPSTREAM_CA"),
+		"PEM file to trust as the only upstream root CA (test/staging only; overrides RAILCORE_UPSTREAM_CA)")
 	_ = fs.Parse(args)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -299,13 +305,45 @@ func runProxy(args []string) {
 		Policies:      policies,
 	}, logger))
 
+	var upstreamResolver func(string) (string, error)
+	if *upstreamOverride != "" {
+		if _, _, err := net.SplitHostPort(*upstreamOverride); err != nil {
+			logger.Error("invalid --upstream-override", "value", *upstreamOverride, "err", err.Error())
+			os.Exit(1)
+		}
+		target := *upstreamOverride
+		upstreamResolver = func(string) (string, error) { return target, nil }
+	}
+
+	var upstreamTLS *tls.Config
+	if *upstreamCA != "" {
+		pem, err := os.ReadFile(*upstreamCA)
+		if err != nil {
+			logger.Error("upstream CA read failed", "path", *upstreamCA, "err", err.Error())
+			os.Exit(1)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			logger.Error("upstream CA file contained no valid PEM certificates", "path", *upstreamCA)
+			os.Exit(1)
+		}
+		upstreamTLS = &tls.Config{RootCAs: pool}
+	}
+
+	if upstreamResolver != nil || upstreamTLS != nil {
+		logger.Warn("upstream override active (test/staging mode)",
+			"override", *upstreamOverride, "ca", *upstreamCA)
+	}
+
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 	srv := proxy.New(proxy.Config{
-		Addr:      addr,
-		CA:        caInst,
-		Pipeline:  chain,
-		Logger:    logger,
-		AuditFunc: auditLogger,
+		Addr:             addr,
+		CA:               caInst,
+		Pipeline:         chain,
+		Logger:           logger,
+		AuditFunc:        auditLogger,
+		UpstreamResolver: upstreamResolver,
+		UpstreamTLS:      upstreamTLS,
 	})
 
 	ln, err := net.Listen("tcp", addr)
