@@ -305,6 +305,15 @@ func runProxy(args []string) {
 		Policies:      policies,
 	}, logger))
 
+	// --upstream-ca alone (without --upstream-override) would silently
+	// narrow upstream TLS trust to just the supplied PEM for all dials,
+	// breaking production handshakes to real vendor hosts. The flag pair
+	// is documented as "test/staging only" — require them together.
+	if *upstreamCA != "" && *upstreamOverride == "" {
+		logger.Error("--upstream-ca requires --upstream-override (test/staging mode pairs both flags)")
+		os.Exit(1)
+	}
+
 	var upstreamResolver func(string) (string, error)
 	if *upstreamOverride != "" {
 		if _, _, err := net.SplitHostPort(*upstreamOverride); err != nil {
