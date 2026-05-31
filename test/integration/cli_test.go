@@ -432,3 +432,44 @@ func TestCLI_Logs_JSON(t *testing.T) {
 		t.Errorf("stdout should contain raw JSON; got %q", stdout)
 	}
 }
+
+func TestCLI_UpstreamOverride_RejectsMalformed(t *testing.T) {
+	tmp := t.TempDir()
+	// Bad value: not host:port (no port at all).
+	_, stderr, code := runCLI(t,
+		"proxy",
+		"--port=0",
+		"--data-dir="+tmp,
+		"--upstream-override=nohost",
+	)
+	if code == 0 {
+		t.Fatalf("railcore: expected non-zero exit; got 0; stderr=%q", stderr)
+	}
+	if !strings.Contains(stderr, "invalid --upstream-override") {
+		t.Errorf("stderr missing 'invalid --upstream-override': %q", stderr)
+	}
+}
+
+func TestCLI_UpstreamCA_RejectsEmptyPEM(t *testing.T) {
+	tmp := t.TempDir()
+	// Write an empty file (no PEM certs).
+	emptyPEM := filepath.Join(tmp, "empty.pem")
+	if err := os.WriteFile(emptyPEM, []byte(""), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	// Pass both flags: --upstream-override validates first (clean host:port),
+	// then --upstream-ca validation fires the "no valid PEM" error we assert.
+	_, stderr, code := runCLI(t,
+		"proxy",
+		"--port=0",
+		"--data-dir="+tmp,
+		"--upstream-override=127.0.0.1:1234",
+		"--upstream-ca="+emptyPEM,
+	)
+	if code == 0 {
+		t.Fatalf("railcore: expected non-zero exit; got 0; stderr=%q", stderr)
+	}
+	if !strings.Contains(stderr, "no valid PEM") {
+		t.Errorf("stderr missing 'no valid PEM': %q", stderr)
+	}
+}
