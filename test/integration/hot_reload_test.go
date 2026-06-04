@@ -19,12 +19,12 @@ import (
 	"testing"
 	"time"
 
-	"railcore/internal/audit"
-	"railcore/internal/ca"
-	"railcore/internal/pipeline"
-	"railcore/internal/policy"
-	"railcore/internal/proxy"
-	pathscanstage "railcore/internal/stage/pathscan"
+	"runveil/internal/audit"
+	"runveil/internal/ca"
+	"runveil/internal/pipeline"
+	"runveil/internal/policy"
+	"runveil/internal/proxy"
+	pathscanstage "runveil/internal/stage/pathscan"
 )
 
 func TestHotReload_E2E_PolicyChangeBlocksOnNextRequest(t *testing.T) {

@@ -3,5 +3,5 @@ package main
 import "fmt"
 
 func runVersion() {
-	fmt.Printf("railcore %s\n", version)
+	fmt.Printf("runveil %s\n", version)
 }

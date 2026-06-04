@@ -1,4 +1,4 @@
-// Package metrics translates the Railcore audit Record/Event stream
+// Package metrics translates the Runveil audit Record/Event stream
 // into Prometheus metrics and serves them on a /metrics endpoint.
 //
 // The Collector implements audit.Logger so it joins the audit
@@ -14,7 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"railcore/internal/audit"
+	"runveil/internal/audit"
 )
 
 // Compile-time guarantee that *Collector is a valid audit sink.
@@ -44,28 +44,28 @@ func NewCollector() *Collector {
 	c := &Collector{
 		registry: prometheus.NewRegistry(),
 		requests: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "railcore_requests_total",
+			Name: "runveil_requests_total",
 			Help: "Total AI requests by pipeline decision.",
 		}, []string{"decision"}),
 		duration: prometheus.NewHistogram(prometheus.HistogramOpts{
-			Name:    "railcore_request_duration_seconds",
+			Name:    "runveil_request_duration_seconds",
 			Help:    "Wall-clock AI request duration in seconds.",
 			Buckets: []float64{0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
 		}),
 		bytesIn: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "railcore_request_bytes_in_total",
+			Name: "runveil_request_bytes_in_total",
 			Help: "Total request bytes inspected.",
 		}),
 		bytesOut: prometheus.NewCounter(prometheus.CounterOpts{
-			Name: "railcore_request_bytes_out_total",
+			Name: "runveil_request_bytes_out_total",
 			Help: "Total response bytes streamed back.",
 		}),
 		findings: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "railcore_findings_total",
+			Name: "runveil_findings_total",
 			Help: "Detector findings by detector type.",
 		}, []string{"detector"}),
 		reloads: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "railcore_policy_reloads_total",
+			Name: "runveil_policy_reloads_total",
 			Help: "Policy reload attempts by outcome.",
 		}, []string{"outcome"}),
 	}

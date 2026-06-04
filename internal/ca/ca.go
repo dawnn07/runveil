@@ -21,12 +21,12 @@ import (
 const (
 	rootCertFile = "ca.crt"
 	rootKeyFile  = "ca.key"
-	rootCN       = "Railcore Local CA"
+	rootCN       = "Runveil Local CA"
 	rootValidity = 10 * 365 * 24 * time.Hour
 	rootKeyBits  = 4096
 )
 
-// CA holds the root certificate and signing key for the local Railcore CA,
+// CA holds the root certificate and signing key for the local Runveil CA,
 // plus an in-memory cache of minted leaf certificates.
 type CA struct {
 	dir      string
@@ -42,7 +42,7 @@ type CA struct {
 //
 // GenerateOrLoad is NOT safe for concurrent calls on the same directory:
 // two simultaneous invocations on a fresh dir may both generate roots and
-// race to overwrite each other's files. Callers must serialize. In Railcore
+// race to overwrite each other's files. Callers must serialize. In Runveil
 // the only caller is the binary entrypoint, which invokes it once at
 // startup before the proxy accepts connections.
 func GenerateOrLoad(dir string) (*CA, error) {
@@ -74,7 +74,7 @@ func generateRoot(dir, certPath, keyPath string) (*CA, error) {
 
 	tmpl := &x509.Certificate{
 		SerialNumber:          serial,
-		Subject:               pkix.Name{CommonName: rootCN, Organization: []string{"Railcore"}},
+		Subject:               pkix.Name{CommonName: rootCN, Organization: []string{"Runveil"}},
 		NotBefore:             time.Now().Add(-1 * time.Hour),
 		NotAfter:              time.Now().Add(rootValidity),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign | x509.KeyUsageDigitalSignature,

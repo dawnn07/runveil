@@ -1,4 +1,4 @@
-// Integration tests for the railcore CLI. Builds the binary once into
+// Integration tests for the runveil CLI. Builds the binary once into
 // a temp directory at TestMain, then execs it with controlled args
 // and an isolated --data-dir per test. Captures stdin/stdout/stderr.
 package integration
@@ -15,29 +15,29 @@ import (
 	"testing"
 )
 
-// railcoreBin holds the absolute path to the built railcore binary.
+// runveilBin holds the absolute path to the built runveil binary.
 // Set by TestMain via go build; reused across tests.
-var railcoreBin string
+var runveilBin string
 
 func TestMain(m *testing.M) {
-	tmpDir, err := os.MkdirTemp("", "railcore-bin-")
+	tmpDir, err := os.MkdirTemp("", "runveil-bin-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "TestMain: MkdirTemp: %v\n", err)
 		os.Exit(2)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	binName := "railcore"
+	binName := "runveil"
 	binPath := filepath.Join(tmpDir, binName)
 
 	repoRoot := findRepoRootForCLITests()
-	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/railcore")
+	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/runveil")
 	cmd.Dir = repoRoot
 	if out, err := cmd.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "TestMain: go build: %v\n%s", err, string(out))
 		os.Exit(2)
 	}
-	railcoreBin = binPath
+	runveilBin = binPath
 	os.Exit(m.Run())
 }
 
@@ -60,12 +60,12 @@ func findRepoRootForCLITests() string {
 	return "."
 }
 
-// runCLI execs the railcore binary with the given args and returns
+// runCLI execs the runveil binary with the given args and returns
 // stdout, stderr, and the exit code. exitCode is -1 if the process
 // could not be started.
 func runCLI(t *testing.T, args ...string) (stdout, stderr string, exitCode int) {
 	t.Helper()
-	cmd := exec.Command(railcoreBin, args...)
+	cmd := exec.Command(runveilBin, args...)
 	var stdoutBuf, stderrBuf bytes.Buffer
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
@@ -91,7 +91,7 @@ func TestCLI_Version(t *testing.T) {
 			if code != 0 {
 				t.Errorf("exit code = %d, want 0; stderr=%q", code, stderr)
 			}
-			want := "railcore 0.1.0\n"
+			want := "runveil 0.1.0\n"
 			if stdout != want {
 				t.Errorf("stdout = %q, want %q", stdout, want)
 			}
@@ -178,7 +178,7 @@ func TestCLI_Init_FreshDataDir(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "policy.yaml")); err != nil {
 		t.Errorf("policy.yaml not created: %v", err)
 	}
-	if !strings.Contains(stdout, "railcore proxy") {
+	if !strings.Contains(stdout, "runveil proxy") {
 		t.Errorf("stdout should include next-steps hint; got %q", stdout)
 	}
 }
@@ -443,7 +443,7 @@ func TestCLI_UpstreamOverride_RejectsMalformed(t *testing.T) {
 		"--upstream-override=nohost",
 	)
 	if code == 0 {
-		t.Fatalf("railcore: expected non-zero exit; got 0; stderr=%q", stderr)
+		t.Fatalf("runveil: expected non-zero exit; got 0; stderr=%q", stderr)
 	}
 	if !strings.Contains(stderr, "invalid --upstream-override") {
 		t.Errorf("stderr missing 'invalid --upstream-override': %q", stderr)
@@ -467,7 +467,7 @@ func TestCLI_UpstreamCA_RejectsEmptyPEM(t *testing.T) {
 		"--upstream-ca="+emptyPEM,
 	)
 	if code == 0 {
-		t.Fatalf("railcore: expected non-zero exit; got 0; stderr=%q", stderr)
+		t.Fatalf("runveil: expected non-zero exit; got 0; stderr=%q", stderr)
 	}
 	if !strings.Contains(stderr, "no valid PEM") {
 		t.Errorf("stderr missing 'no valid PEM': %q", stderr)

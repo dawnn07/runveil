@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"railcore/internal/detector"
-	"railcore/internal/pipeline"
-	"railcore/internal/policy"
+	"runveil/internal/detector"
+	"runveil/internal/pipeline"
+	"runveil/internal/policy"
 )
 
 func newRC(t *testing.T, host string, body string, method, path string) *pipeline.RequestCtx {

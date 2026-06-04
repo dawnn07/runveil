@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"railcore/internal/pipeline"
-	"railcore/internal/policy"
+	"runveil/internal/pipeline"
+	"runveil/internal/policy"
 )
 
 func discardLogger() *slog.Logger {

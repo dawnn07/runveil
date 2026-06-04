@@ -20,9 +20,9 @@ import (
 
 	"go.uber.org/goleak"
 
-	"railcore/internal/audit"
-	"railcore/internal/ca"
-	"railcore/internal/pipeline"
+	"runveil/internal/audit"
+	"runveil/internal/ca"
+	"runveil/internal/pipeline"
 )
 
 func newTestServer(t *testing.T) (*Server, string) {

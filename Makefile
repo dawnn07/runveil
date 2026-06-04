@@ -1,7 +1,7 @@
 .PHONY: build test test-race lint vet vuln clean
 
 build:
-	go build -o railcore ./cmd/railcore
+	go build -o runveil ./cmd/runveil
 
 test:
 	go test ./...
@@ -19,5 +19,5 @@ vuln:
 	govulncheck ./...
 
 clean:
-	rm -f railcore railcore.exe
+	rm -f runveil runveil.exe
 	rm -rf dist/

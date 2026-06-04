@@ -38,7 +38,7 @@ func loadCorpus(t *testing.T) string {
 	t.Helper()
 	repoRoot := findRepoRoot(t)
 	files := []string{
-		"cmd/railcore/main.go",
+		"cmd/runveil/main.go",
 		"internal/ca/ca.go",
 		"internal/ca/leaf.go",
 		"internal/proxy/server.go",

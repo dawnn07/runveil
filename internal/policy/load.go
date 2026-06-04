@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"railcore/internal/detector"
+	"runveil/internal/detector"
 )
 
 // yamlRoot is the on-wire schema of a policy file.
@@ -54,7 +54,7 @@ func LoadFromBytes(data []byte) (*Policy, error) {
 		return nil, fmt.Errorf("policy: version is required (must be 1)")
 	}
 	if root.Version != 1 {
-		return nil, fmt.Errorf("policy: unsupported version %d, this railcore build supports version 1", root.Version)
+		return nil, fmt.Errorf("policy: unsupported version %d, this runveil build supports version 1", root.Version)
 	}
 	if len(root.Rules) == 0 {
 		return nil, fmt.Errorf("policy: rules is required and must contain at least one rule")

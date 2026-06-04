@@ -1,5 +1,5 @@
 // Package pipeline defines the Stage interface and Chain dispatcher used
-// by the Railcore proxy to run extensible request-processing stages.
+// by the Runveil proxy to run extensible request-processing stages.
 //
 // pipeline is a leaf package: it must not import any other internal/ package.
 package pipeline

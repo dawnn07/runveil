@@ -15,7 +15,7 @@ package pathscan
 import (
 	"encoding/json"
 
-	"railcore/internal/parser"
+	"runveil/internal/parser"
 )
 
 // PathEvent is one tool_use invocation that names a file path.

@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"railcore/internal/audit"
-	"railcore/internal/parser"
-	"railcore/internal/pipeline"
+	"runveil/internal/audit"
+	"runveil/internal/parser"
+	"runveil/internal/pipeline"
 )
 
 // writeJSONResp writes a JSON error response via an http.ResponseWriter.
@@ -188,7 +188,7 @@ func (s *Server) upstreamTLSConfig(serverName string) *tls.Config {
 		return cfg
 	}
 	// IMPORTANT: no RootCAs set => system trust store is used. Do NOT add
-	// the Railcore CA here; that would let Railcore MITM itself.
+	// the Runveil CA here; that would let Runveil MITM itself.
 	return &tls.Config{ServerName: serverName}
 }
 
@@ -205,7 +205,7 @@ func isMaxBytesErr(err error) bool {
 // echoed because the path is the actionable signal for operators.
 func writeBlockResp(w http.ResponseWriter, requestID string, rc *pipeline.RequestCtx) {
 	body := map[string]any{
-		"error":      "blocked by railcore policy",
+		"error":      "blocked by runveil policy",
 		"request_id": requestID,
 	}
 
@@ -344,7 +344,7 @@ func (r *statusRecorder) Flush() {
 
 // errListenerClosed is returned by singleConnListener.Accept after its one
 // connection has been served. http.Server treats this as a clean shutdown.
-var errListenerClosed = errors.New("railcore: single-shot listener closed")
+var errListenerClosed = errors.New("runveil: single-shot listener closed")
 
 // singleConnListener serves exactly one connection then errors on Accept,
 // causing http.Server.Serve to return. The bool is guarded by a mutex

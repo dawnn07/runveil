@@ -41,7 +41,7 @@ func tryUpdateCACertificates(caPath string) error {
 	if _, err := exec.LookPath("update-ca-certificates"); err != nil {
 		return fmt.Errorf("update-ca-certificates not found: %w", err)
 	}
-	dest := "/usr/local/share/ca-certificates/railcore.crt"
+	dest := "/usr/local/share/ca-certificates/runveil.crt"
 	cp := exec.Command("cp", caPath, dest)
 	if out, err := cp.CombinedOutput(); err != nil {
 		return fmt.Errorf("cp: %s: %w", string(out), err)
@@ -54,7 +54,7 @@ func tryUpdateCACertificates(caPath string) error {
 }
 
 func tryUpdateCACertificatesUninstall(_ string) error {
-	dest := "/usr/local/share/ca-certificates/railcore.crt"
+	dest := "/usr/local/share/ca-certificates/runveil.crt"
 	exec.Command("rm", "-f", dest).Run()
 	exec.Command("update-ca-certificates", "--fresh").Run()
 	return nil
@@ -64,7 +64,7 @@ func tryNSSInstall(caPath string) error {
 	if _, err := exec.LookPath("certutil"); err != nil {
 		return fmt.Errorf("certutil not found: %w", err)
 	}
-	cmd := exec.Command("certutil", "-d", "sql:"+nssDBPath(), "-A", "-t", "C,,", "-n", "railcore", "-i", caPath)
+	cmd := exec.Command("certutil", "-d", "sql:"+nssDBPath(), "-A", "-t", "C,,", "-n", "runveil", "-i", caPath)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("certutil: %s: %w", string(out), err)
 	}
@@ -75,7 +75,7 @@ func tryNSSUninstall(_ string) error {
 	if _, err := exec.LookPath("certutil"); err != nil {
 		return nil
 	}
-	cmd := exec.Command("certutil", "-d", "sql:"+nssDBPath(), "-D", "-n", "railcore")
+	cmd := exec.Command("certutil", "-d", "sql:"+nssDBPath(), "-D", "-n", "runveil")
 	_, _ = cmd.CombinedOutput()
 	return nil
 }
@@ -90,8 +90,8 @@ func nssDBPath() string {
 // ManualInstructions returns shell commands the user can run by hand.
 func ManualInstructions(caPath string) string {
 	q := shellQuote(caPath)
-	return fmt.Sprintf(`sudo cp %s /usr/local/share/ca-certificates/railcore.crt && sudo update-ca-certificates
+	return fmt.Sprintf(`sudo cp %s /usr/local/share/ca-certificates/runveil.crt && sudo update-ca-certificates
 # or, per-user (Firefox/Chrome NSS):
-certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n railcore -i %s
+certutil -d sql:$HOME/.pki/nssdb -A -t "C,," -n runveil -i %s
 `, q, q)
 }

@@ -18,11 +18,11 @@ import (
 	"testing"
 	"time"
 
-	"railcore/internal/ca"
-	"railcore/internal/pipeline"
-	"railcore/internal/policy"
-	"railcore/internal/proxy"
-	pathscanstage "railcore/internal/stage/pathscan"
+	"runveil/internal/ca"
+	"runveil/internal/pipeline"
+	"runveil/internal/policy"
+	"runveil/internal/proxy"
+	pathscanstage "runveil/internal/stage/pathscan"
 )
 
 func TestRemotePolicy_E2E_ProxyFetchesAndEnforces(t *testing.T) {

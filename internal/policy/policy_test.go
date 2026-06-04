@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"railcore/internal/detector"
+	"runveil/internal/detector"
 )
 
 func TestAction_String(t *testing.T) {

@@ -17,10 +17,10 @@ import (
 	"testing"
 	"time"
 
-	"railcore/internal/audit"
-	"railcore/internal/ca"
-	"railcore/internal/pipeline"
-	"railcore/internal/proxy"
+	"runveil/internal/audit"
+	"runveil/internal/ca"
+	"runveil/internal/pipeline"
+	"runveil/internal/proxy"
 )
 
 func TestIdentity_E2E_AuditRecordCarriesUser(t *testing.T) {

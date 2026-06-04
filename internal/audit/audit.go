@@ -1,9 +1,9 @@
-// Package audit captures per-request audit events from the Railcore
+// Package audit captures per-request audit events from the Runveil
 // proxy and persists them as JSON Lines to a rotating file.
 //
 // audit is a leaf package: it depends only on stdlib and
 // gopkg.in/natefinch/lumberjack.v2 (rotation). It does not import
-// any other railcore/internal/ package; producers pass values via
+// any other runveil/internal/ package; producers pass values via
 // the Logger interface.
 package audit
 

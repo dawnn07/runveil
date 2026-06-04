@@ -7,14 +7,14 @@ import (
 	"os"
 	"path/filepath"
 
-	"railcore/internal/ca"
-	"railcore/internal/trust"
+	"runveil/internal/ca"
+	"runveil/internal/trust"
 )
 
 const starterPolicyTemplate = `version: 1
 
 rules:
-  # Warn on every finding. Edit this file to customize what railcore does
+  # Warn on every finding. Edit this file to customize what runveil does
   # with detected secrets and tool-use file paths.
   - name: default-warn
     match: {all: true}
@@ -81,8 +81,8 @@ func runInit(args []string) {
 	}
 
 	fmt.Print(`
-railcore is set up. Start the proxy with:
-  railcore proxy
+runveil is set up. Start the proxy with:
+  runveil proxy
 Then configure your AI tool to use http://localhost:9443 as its HTTPS proxy.
 `)
 }

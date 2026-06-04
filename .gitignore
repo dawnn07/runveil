@@ -1,6 +1,6 @@
 # Binaries
-/railcore
-/railcore.exe
+/runveil
+/runveil.exe
 /dist/
 
 # Go build cache
@@ -8,9 +8,12 @@
 *.out
 coverage.txt
 
+# Stray logs from dev sessions
+*.log
+
 # Local CA generated during dev runs
-.railcore-data/
-~/.railcore/
+.runveil-data/
+~/.runveil/
 
 # IDE
 .vscode/

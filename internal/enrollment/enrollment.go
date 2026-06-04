@@ -36,7 +36,7 @@ type fileShape struct {
 // when no source is configured. A malformed or unreadable file is a
 // hard error: the operator clearly meant to enroll.
 func Load(dataDir string) (Enrollment, error) {
-	if orgID, token := os.Getenv("RAILCORE_ORG_ID"), os.Getenv("RAILCORE_DEVICE_TOKEN"); orgID != "" && token != "" {
+	if orgID, token := os.Getenv("RUNVEIL_ORG_ID"), os.Getenv("RUNVEIL_DEVICE_TOKEN"); orgID != "" && token != "" {
 		return Enrollment{OrgID: orgID, DeviceToken: token}, nil
 	}
 

@@ -12,10 +12,10 @@ import (
 	"log/slog"
 	"unicode/utf8"
 
-	"railcore/internal/detector"
-	"railcore/internal/parser"
-	"railcore/internal/pipeline"
-	"railcore/internal/policy"
+	"runveil/internal/detector"
+	"runveil/internal/parser"
+	"runveil/internal/pipeline"
+	"runveil/internal/policy"
 )
 
 // Config controls the stage's runtime behaviour.

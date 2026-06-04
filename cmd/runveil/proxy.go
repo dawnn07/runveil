@@ -17,21 +17,21 @@ import (
 	"syscall"
 	"time"
 
-	"railcore/internal/audit"
-	"railcore/internal/ca"
-	"railcore/internal/enrollment"
-	"railcore/internal/metrics"
-	"railcore/internal/pipeline"
-	"railcore/internal/policy"
-	"railcore/internal/proxy"
-	"railcore/internal/stage/pathscan"
-	"railcore/internal/stage/secretscan"
-	"railcore/internal/trust"
+	"runveil/internal/audit"
+	"runveil/internal/ca"
+	"runveil/internal/enrollment"
+	"runveil/internal/metrics"
+	"runveil/internal/pipeline"
+	"runveil/internal/policy"
+	"runveil/internal/proxy"
+	"runveil/internal/stage/pathscan"
+	"runveil/internal/stage/secretscan"
+	"runveil/internal/trust"
 )
 
 func runProxy(args []string) {
 	fs := flag.NewFlagSet("proxy", flag.ExitOnError)
-	port := fs.Int("port", defaultPort(), "TCP port to listen on (overrides RAILCORE_PORT)")
+	port := fs.Int("port", defaultPort(), "TCP port to listen on (overrides RUNVEIL_PORT)")
 	dataDir := fs.String("data-dir", defaultDataDir(), "directory for CA + state")
 	blockOnDetect := fs.Bool("block-on-detect", false, "return 403 on High-severity secret findings (default WARN only). Ignored when a policy file is in effect.")
 	policyPath := fs.String("policy", "", "path to a YAML policy file (default: <data-dir>/policy.yaml if it exists)")
@@ -41,12 +41,12 @@ func runProxy(args []string) {
 	auditMaxBackups := fs.Int("audit-max-backups", 5, "rotated audit files to retain")
 	auditMaxAgeDays := fs.Int("audit-max-age-days", 30, "max age in days for rotated audit files")
 	siemURL := fs.String("siem-url", "", "SIEM collector endpoint URL; empty disables SIEM export")
-	siemAuthHeader := fs.String("siem-auth-header", "", "auth header name for SIEM POSTs (value from RAILCORE_SIEM_AUTH env)")
+	siemAuthHeader := fs.String("siem-auth-header", "", "auth header name for SIEM POSTs (value from RUNVEIL_SIEM_AUTH env)")
 	siemBatchSize := fs.Int("siem-batch-size", 100, "audit records per SIEM batch")
 	siemFlushInterval := fs.Duration("siem-flush-interval", 5*time.Second, "max age of a partial SIEM batch")
 	siemMaxBufferBatches := fs.Int("siem-max-buffer-batches", 64, "SIEM retry-buffer cap (batches) before drop-oldest")
 	identityFlag := fs.String("identity", "",
-		"developer identity for audit records (default: OS username; RAILCORE_IDENTITY env also honored)")
+		"developer identity for audit records (default: OS username; RUNVEIL_IDENTITY env also honored)")
 	metricsPort := fs.Int("metrics-port", 0,
 		"port for the Prometheus /metrics endpoint (0 = disabled; e.g. 9464)")
 	policyURL := fs.String("policy-url", "",
@@ -54,11 +54,11 @@ func runProxy(args []string) {
 	policyURLInterval := fs.Duration("policy-url-interval", 30*time.Second,
 		"how often to poll --policy-url for changes")
 	policyURLAuthHeader := fs.String("policy-url-auth-header", "",
-		"auth header name for --policy-url requests (value from RAILCORE_POLICY_TOKEN env)")
-	upstreamOverride := fs.String("upstream-override", os.Getenv("RAILCORE_UPSTREAM_OVERRIDE"),
-		"redirect every upstream TLS dial to this host:port (test/staging only; overrides RAILCORE_UPSTREAM_OVERRIDE)")
-	upstreamCA := fs.String("upstream-ca", os.Getenv("RAILCORE_UPSTREAM_CA"),
-		"PEM file to trust as the only upstream root CA (test/staging only; overrides RAILCORE_UPSTREAM_CA)")
+		"auth header name for --policy-url requests (value from RUNVEIL_POLICY_TOKEN env)")
+	upstreamOverride := fs.String("upstream-override", os.Getenv("RUNVEIL_UPSTREAM_OVERRIDE"),
+		"redirect every upstream TLS dial to this host:port (test/staging only; overrides RUNVEIL_UPSTREAM_OVERRIDE)")
+	upstreamCA := fs.String("upstream-ca", os.Getenv("RUNVEIL_UPSTREAM_CA"),
+		"PEM file to trust as the only upstream root CA (test/staging only; overrides RUNVEIL_UPSTREAM_CA)")
 	_ = fs.Parse(args)
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
@@ -108,13 +108,13 @@ func runProxy(args []string) {
 	// Construct the SIEM sink when --siem-url is set.
 	var siemSink *audit.HTTPSink
 	if *siemURL != "" {
-		if *siemAuthHeader != "" && os.Getenv("RAILCORE_SIEM_AUTH") == "" {
-			logger.Warn("siem auth header configured but RAILCORE_SIEM_AUTH is empty")
+		if *siemAuthHeader != "" && os.Getenv("RUNVEIL_SIEM_AUTH") == "" {
+			logger.Warn("siem auth header configured but RUNVEIL_SIEM_AUTH is empty")
 		}
 		sink, err := audit.NewHTTPSink(audit.HTTPConfig{
 			URL:              *siemURL,
 			AuthHeader:       *siemAuthHeader,
-			AuthValue:        os.Getenv("RAILCORE_SIEM_AUTH"),
+			AuthValue:        os.Getenv("RUNVEIL_SIEM_AUTH"),
 			BatchSize:        *siemBatchSize,
 			FlushInterval:    *siemFlushInterval,
 			MaxBufferBatches: *siemMaxBufferBatches,
@@ -168,7 +168,7 @@ func runProxy(args []string) {
 		os.Exit(1)
 	}
 
-	effectiveBlock := *blockOnDetect || os.Getenv("RAILCORE_BLOCK_ON_DETECT") == "1"
+	effectiveBlock := *blockOnDetect || os.Getenv("RUNVEIL_BLOCK_ON_DETECT") == "1"
 
 	chain := pipeline.NewChain().WithLogger(logger)
 
@@ -231,17 +231,17 @@ func runProxy(args []string) {
 		policySource = *policyURL
 		cachePath := filepath.Join(*dataDir, "policy-cache.yaml")
 
-		// Auth value precedence: RAILCORE_POLICY_TOKEN (per-endpoint
+		// Auth value precedence: RUNVEIL_POLICY_TOKEN (per-endpoint
 		// override) wins; otherwise fall back to the enrollment device
 		// token; otherwise empty (no auth header is sent).
-		authValue := os.Getenv("RAILCORE_POLICY_TOKEN")
+		authValue := os.Getenv("RUNVEIL_POLICY_TOKEN")
 		if authValue == "" {
 			authValue = enr.DeviceToken
 		} else if enr.DeviceToken != "" {
-			logger.Debug("RAILCORE_POLICY_TOKEN overrides device token for policy URL")
+			logger.Debug("RUNVEIL_POLICY_TOKEN overrides device token for policy URL")
 		}
 		if *policyURLAuthHeader != "" && authValue == "" {
-			logger.Warn("policy URL auth header configured but no token available (set RAILCORE_ORG_ID + RAILCORE_DEVICE_TOKEN, enroll via device.json, or set RAILCORE_POLICY_TOKEN)")
+			logger.Warn("policy URL auth header configured but no token available (set RUNVEIL_ORG_ID + RUNVEIL_DEVICE_TOKEN, enroll via device.json, or set RUNVEIL_POLICY_TOKEN)")
 		}
 		src, serr := policy.NewRemoteSource(policy.RemoteConfig{
 			URL:        *policyURL,
@@ -358,7 +358,7 @@ func runProxy(args []string) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		logger.Error("listen failed", "addr", addr, "err", err.Error())
-		fmt.Fprintf(os.Stderr, "port %d in use; set RAILCORE_PORT or stop other process\n", *port)
+		fmt.Fprintf(os.Stderr, "port %d in use; set RUNVEIL_PORT or stop other process\n", *port)
 		os.Exit(1)
 	}
 
@@ -372,7 +372,7 @@ func runProxy(args []string) {
 		startupArgs = append(startupArgs, "policy_source", policySource,
 			"rules", policies.Get().RuleCount())
 	}
-	logger.Info("railcore proxy listening", startupArgs...)
+	logger.Info("runveil proxy listening", startupArgs...)
 
 	go func() {
 		<-ctx.Done()
@@ -414,13 +414,13 @@ func resolvePolicy(flagPath, dataDir string, logger *slog.Logger) (*policy.Polic
 
 // detectIdentity resolves the developer identity stamped onto audit
 // records. Precedence for the user: --identity flag, then the
-// RAILCORE_IDENTITY env var, then the OS username. machine is always
+// RUNVEIL_IDENTITY env var, then the OS username. machine is always
 // the hostname. Any source may fail to a "" value, which is dropped
 // from the audit record by omitempty.
 func detectIdentity(flagVal string) audit.Identity {
 	name := flagVal
 	if name == "" {
-		name = os.Getenv("RAILCORE_IDENTITY")
+		name = os.Getenv("RUNVEIL_IDENTITY")
 	}
 	if name == "" {
 		if u, err := osuser.Current(); err == nil {

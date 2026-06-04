@@ -1,4 +1,4 @@
-// Package trust installs the Railcore local CA into the operating system's
+// Package trust installs the Runveil local CA into the operating system's
 // trust store. trust is a leaf package: it must not import any other
 // internal/ package.
 package trust

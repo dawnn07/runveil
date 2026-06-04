@@ -54,8 +54,8 @@ func TestGenerateOrLoad_CreatesFreshRoot(t *testing.T) {
 	if !cert.IsCA {
 		t.Fatal("root cert must have IsCA=true")
 	}
-	if cert.Subject.CommonName != "Railcore Local CA" {
-		t.Fatalf("CN = %q, want %q", cert.Subject.CommonName, "Railcore Local CA")
+	if cert.Subject.CommonName != "Runveil Local CA" {
+		t.Fatalf("CN = %q, want %q", cert.Subject.CommonName, "Runveil Local CA")
 	}
 }
 

@@ -18,10 +18,10 @@ import (
 	"testing"
 	"time"
 
-	"railcore/internal/ca"
-	"railcore/internal/pipeline"
-	"railcore/internal/proxy"
-	"railcore/internal/stage/secretscan"
+	"runveil/internal/ca"
+	"runveil/internal/pipeline"
+	"runveil/internal/proxy"
+	"runveil/internal/stage/secretscan"
 )
 
 func setupSecretscan(t *testing.T, blockOnDetect bool) (client *http.Client, upstreamHits *int32, cleanup func()) {

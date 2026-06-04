@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"railcore/internal/policy"
+	"runveil/internal/policy"
 )
 
 func runStatus(args []string) {
@@ -27,7 +27,7 @@ func runStatus(args []string) {
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 	running := proxyRunning(addr)
 
-	fmt.Println("railcore status")
+	fmt.Println("runveil status")
 	fmt.Println()
 	fmt.Println("CA:")
 	fmt.Printf("  path:        %s\n", caPath)
@@ -50,7 +50,7 @@ func runStatus(args []string) {
 
 	if !caExists {
 		fmt.Println()
-		fmt.Println("Run 'railcore init' first.")
+		fmt.Println("Run 'runveil init' first.")
 	}
 }
 

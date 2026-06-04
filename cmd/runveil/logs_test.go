@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"railcore/internal/audit"
+	"runveil/internal/audit"
 )
 
 func TestFormatRecord_Continue(t *testing.T) {

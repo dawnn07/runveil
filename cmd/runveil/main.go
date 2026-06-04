@@ -1,4 +1,4 @@
-// Package main is the Railcore CLI entrypoint.
+// Package main is the Runveil CLI entrypoint.
 //
 // Subcommands live in sibling files: proxy.go, init.go, status.go,
 // test_policy.go, version.go. helpers.go holds shared utilities.
@@ -41,7 +41,7 @@ func main() {
 }
 
 func printUsage() {
-	fmt.Fprint(os.Stderr, `usage: railcore <command> [flags...]
+	fmt.Fprint(os.Stderr, `usage: runveil <command> [flags...]
 
 Commands:
   init           First-run setup: generate CA, install trust, write starter policy.
@@ -51,6 +51,6 @@ Commands:
   test-policy    Validate a YAML policy file.
   version        Print binary version.
 
-Run "railcore <command> --help" for command-specific flags.
+Run "runveil <command> --help" for command-specific flags.
 `)
 }

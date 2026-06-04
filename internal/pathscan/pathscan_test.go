@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"railcore/internal/parser"
+	"runveil/internal/parser"
 )
 
 func mustParse(t *testing.T, host, body string) *parser.ParsedRequest {
