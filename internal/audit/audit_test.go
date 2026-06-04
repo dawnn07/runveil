@@ -86,7 +86,7 @@ func TestEvent_MarshalJSON_AllFields(t *testing.T) {
 	e := Event{
 		Time:        time.Date(2026, 5, 19, 10, 1, 23, 0, time.UTC),
 		Kind:        "policy_reload",
-		PolicyPath:  "/home/dawn/.railcore/policy.yaml",
+		PolicyPath:  "/etc/railcore/policy.yaml",
 		Outcome:     "accepted",
 		RulesBefore: 2,
 		RulesAfter:  3,
@@ -99,7 +99,7 @@ func TestEvent_MarshalJSON_AllFields(t *testing.T) {
 	for _, want := range []string{
 		`"time":"2026-05-19T10:01:23Z"`,
 		`"kind":"policy_reload"`,
-		`"policy_path":"/home/dawn/.railcore/policy.yaml"`,
+		`"policy_path":"/etc/railcore/policy.yaml"`,
 		`"outcome":"accepted"`,
 		`"rules_before":2`,
 		`"rules_after":3`,
