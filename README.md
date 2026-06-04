@@ -22,6 +22,23 @@ strangers.
 
 ## Install
 
+### Prebuilt binary (recommended)
+
+Download the archive for your platform from the
+[latest release](https://github.com/dawnn07/runveil/releases/latest),
+extract it, and move the `runveil` binary onto your `$PATH`:
+
+```sh
+# example: Linux x86_64
+tar xzf runveil_*_linux_amd64.tar.gz
+sudo mv runveil /usr/local/bin/
+```
+
+Builds are published for Linux, macOS, and Windows (amd64 + arm64).
+Each release also ships a `SHA256SUMS` file you can verify against.
+
+### From source
+
 Requires Go 1.25.
 
 ```sh
@@ -173,7 +190,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Issues and PRs welcome.
 ## Security disclosure
 
 See [SECURITY.md](SECURITY.md). Please **do not** file public issues
-for vulnerabilities — email the address listed there instead.
+for vulnerabilities — report them privately through GitHub's Security
+tab (**Report a vulnerability**), as described there.
 
 ## License
 
