@@ -25,6 +25,8 @@ func main() {
 		runLogs(os.Args[2:])
 	case "proxy":
 		runProxy(os.Args[2:])
+	case "service":
+		runService(os.Args[2:])
 	case "status":
 		runStatus(os.Args[2:])
 	case "test-policy":
@@ -47,6 +49,7 @@ Commands:
   init           First-run setup: generate CA, install trust, write starter policy.
   logs           Stream the audit log (default: tail last 50, --follow for live).
   proxy          Start the forward HTTPS proxy (foreground).
+  service        Install/uninstall the proxy as an always-on background service.
   status         Show config + running-proxy state.
   test-policy    Validate a YAML policy file.
   version        Print binary version.

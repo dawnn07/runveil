@@ -86,6 +86,34 @@ To see what's flowing through:
 ./runveil logs --follow
 ```
 
+## Always-on (run in the background)
+
+Instead of starting `runveil proxy` by hand each session, install it as a
+background service that starts on login and restarts on failure:
+
+```sh
+runveil service install
+```
+
+This registers a user service (systemd on Linux, launchd on macOS) and
+prints two `export` lines. Add them to your shell profile once:
+
+```sh
+export HTTPS_PROXY=http://127.0.0.1:9443
+export NODE_EXTRA_CA_CERTS=~/.runveil/ca/ca.crt
+```
+
+After that, any tool you launch from a fresh shell — `claude`, `cursor`,
+your own scripts — flows through runveil automatically. Remove it with:
+
+```sh
+runveil service uninstall
+```
+
+Note: setting `HTTPS_PROXY` routes *all* HTTPS traffic in that shell
+through the proxy, not just your AI tool. The service auto-restarts, but
+if you stop it, unset those vars too.
+
 ## Writing policy
 
 The starter policy file looks like this:
@@ -163,6 +191,7 @@ manager (the same place `runveil init` installed it).
 |---|---|
 | `runveil init` | Generate CA, install trust, write starter policy. Idempotent. |
 | `runveil proxy` | Run the forward HTTPS proxy. |
+| `runveil service` | Install/uninstall the proxy as an always-on background service. |
 | `runveil status` | Show config + whether a proxy is currently running. |
 | `runveil logs` | Tail the audit log. `--follow` for live. |
 | `runveil test-policy` | Validate a policy file without starting the proxy. |
