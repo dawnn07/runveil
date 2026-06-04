@@ -8,6 +8,9 @@
 *.out
 coverage.txt
 
+# Stray logs from dev sessions
+*.log
+
 # Local CA generated during dev runs
 .railcore-data/
 ~/.railcore/
