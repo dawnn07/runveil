@@ -16,7 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	"railcore/internal/audit"
+	"runveil/internal/audit"
 )
 
 func runLogs(args []string) {

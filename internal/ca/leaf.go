@@ -43,7 +43,7 @@ func (c *CA) MintLeaf(host string) (*tls.Certificate, error) {
 
 	tmpl := &x509.Certificate{
 		SerialNumber: serial,
-		Subject:      pkix.Name{CommonName: host, Organization: []string{"Railcore"}},
+		Subject:      pkix.Name{CommonName: host, Organization: []string{"Runveil"}},
 		NotBefore:    time.Now().Add(-1 * time.Hour),
 		NotAfter:     time.Now().Add(leafValidity),
 		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,

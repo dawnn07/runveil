@@ -1,6 +1,6 @@
 // Package integration contains end-to-end tests that spin up an in-process
-// Railcore proxy and a fake upstream, then drive real http.Client traffic
-// through both. These tests exercise the same wiring `cmd/railcore` does.
+// Runveil proxy and a fake upstream, then drive real http.Client traffic
+// through both. These tests exercise the same wiring `cmd/runveil` does.
 package integration
 
 import (
@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"railcore/internal/ca"
-	"railcore/internal/pipeline"
-	"railcore/internal/proxy"
+	"runveil/internal/ca"
+	"runveil/internal/pipeline"
+	"runveil/internal/proxy"
 )
 
 func setupH2(t *testing.T) (*http.Client, *httptest.Server, func()) {

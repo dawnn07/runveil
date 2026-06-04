@@ -6,7 +6,7 @@ import (
 
 func TestDetectIdentity(t *testing.T) {
 	t.Run("flag wins over env and OS", func(t *testing.T) {
-		t.Setenv("RAILCORE_IDENTITY", "env-user")
+		t.Setenv("RUNVEIL_IDENTITY", "env-user")
 		id := detectIdentity("flag-user")
 		if id.User != "flag-user" {
 			t.Errorf("User = %q, want flag-user (flag must win)", id.User)
@@ -14,7 +14,7 @@ func TestDetectIdentity(t *testing.T) {
 	})
 
 	t.Run("env wins over OS when flag empty", func(t *testing.T) {
-		t.Setenv("RAILCORE_IDENTITY", "env-user")
+		t.Setenv("RUNVEIL_IDENTITY", "env-user")
 		id := detectIdentity("")
 		if id.User != "env-user" {
 			t.Errorf("User = %q, want env-user (env must win when flag empty)", id.User)
@@ -22,7 +22,7 @@ func TestDetectIdentity(t *testing.T) {
 	})
 
 	t.Run("falls back to OS user when flag and env empty", func(t *testing.T) {
-		t.Setenv("RAILCORE_IDENTITY", "")
+		t.Setenv("RUNVEIL_IDENTITY", "")
 		id := detectIdentity("")
 		// We can't assert the exact OS username portably, but in a normal
 		// test environment os/user.Current() succeeds, so User must be

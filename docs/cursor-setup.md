@@ -1,25 +1,25 @@
-# Using Railcore with Cursor
+# Using Runveil with Cursor
 
-Railcore inspects every AI request your tools make through it. Cursor in **BYOK** (Bring Your Own Key) mode sends prompts directly to OpenAI or Anthropic — Railcore sits in front, applies your policy, and writes an audit record per request.
+Runveil inspects every AI request your tools make through it. Cursor in **BYOK** (Bring Your Own Key) mode sends prompts directly to OpenAI or Anthropic — Runveil sits in front, applies your policy, and writes an audit record per request.
 
 This guide gets you wired up in five minutes.
 
 > **What about non-BYOK?**
-> When BYOK is off, Cursor routes prompts through `api2.cursor.sh` (its own backend). Railcore still sees that traffic at the host level (audit logs `host=api2.cursor.sh decision=continue`) but cannot decrypt the payload — Cursor pins its certificate. To get full policy enforcement, use BYOK.
+> When BYOK is off, Cursor routes prompts through `api2.cursor.sh` (its own backend). Runveil still sees that traffic at the host level (audit logs `host=api2.cursor.sh decision=continue`) but cannot decrypt the payload — Cursor pins its certificate. To get full policy enforcement, use BYOK.
 
 ---
 
-## 1. Start Railcore
+## 1. Start Runveil
 
 ```bash
-railcore init                          # first run only
-railcore proxy --port 9443
+runveil init                          # first run only
+runveil proxy --port 9443
 ```
 
 Leave it running. In another terminal:
 
 ```bash
-railcore logs --follow
+runveil logs --follow
 ```
 
 This streams audit records live so you can watch what Cursor sends.
@@ -42,38 +42,38 @@ Cursor does **not** honor the `HTTPS_PROXY` environment variable. The proxy URL 
 
 (If the **Beta** section doesn't show **Custom Proxy URL**, check **Settings → Network**. The label has moved between Cursor releases. Search the settings dialog for "proxy".)
 
-## 4. Trust the Railcore CA
+## 4. Trust the Runveil CA
 
-Cursor is an Electron app and uses Chromium's certificate store. On most Linux distros, `railcore init` already trusts the CA system-wide. If you see TLS errors in Cursor:
+Cursor is an Electron app and uses Chromium's certificate store. On most Linux distros, `runveil init` already trusts the CA system-wide. If you see TLS errors in Cursor:
 
 **Linux (Debian/Ubuntu):**
 ```bash
-sudo cp ~/.railcore/ca/ca.crt /usr/local/share/ca-certificates/railcore.crt
+sudo cp ~/.runveil/ca/ca.crt /usr/local/share/ca-certificates/runveil.crt
 sudo update-ca-certificates
 ```
 
 **macOS:**
 ```bash
 sudo security add-trusted-cert -d -r trustRoot \
-  -k /Library/Keychains/System.keychain ~/.railcore/ca/ca.crt
+  -k /Library/Keychains/System.keychain ~/.runveil/ca/ca.crt
 ```
 
 **Windows:**
 ```powershell
-certutil -addstore "Root" "$env:USERPROFILE\.railcore\ca\ca.crt"
+certutil -addstore "Root" "$env:USERPROFILE\.runveil\ca\ca.crt"
 ```
 
 Restart Cursor after installing the cert.
 
 ## 5. Verify
 
-In Cursor, open chat and ask a benign question ("explain a binary search"). In your `railcore logs --follow` terminal you should see a record like:
+In Cursor, open chat and ask a benign question ("explain a binary search"). In your `runveil logs --follow` terminal you should see a record like:
 
 ```
 HH:MM:SS  ✓  POST  api.openai.com        /v1/chat/completions          200  240ms  continue
 ```
 
-Now try something policy should block. With this rule in `~/.railcore/policy.yaml`:
+Now try something policy should block. With this rule in `~/.runveil/policy.yaml`:
 
 ```yaml
 version: 1
@@ -88,13 +88,13 @@ rules:
 
 (Note: specific blocks must come **before** the catch-all warn — first match wins.)
 
-Restart `railcore proxy` to pick up the change. In Cursor's Composer, ask it to read a file at `~/anywhere/payments/anything.txt`. Cursor's tool call should fail with a 403 error from the proxy, and the audit line shows:
+Restart `runveil proxy` to pick up the change. In Cursor's Composer, ask it to read a file at `~/anywhere/payments/anything.txt`. Cursor's tool call should fail with a 403 error from the proxy, and the audit line shows:
 
 ```
 HH:MM:SS  ✗  POST  api.openai.com        /v1/chat/completions          403  18ms   block    findings=1 [block-payments]
 ```
 
-That's it. Cursor + Railcore is now governing every prompt your IDE sends.
+That's it. Cursor + Runveil is now governing every prompt your IDE sends.
 
 ---
 
@@ -102,7 +102,7 @@ That's it. Cursor + Railcore is now governing every prompt your IDE sends.
 
 | Symptom | Fix |
 |---|---|
-| Cursor shows "tunnel connection failed" | Railcore not running or wrong port. Check `railcore status`. |
+| Cursor shows "tunnel connection failed" | Runveil not running or wrong port. Check `runveil status`. |
 | Cursor shows certificate errors | CA not trusted by system store. Re-run step 4 and restart Cursor. |
 | Audit log empty | Cursor still using its own backend. Confirm BYOK is on AND the Custom Proxy URL is set. |
-| Records appear with `vendor=""` | Cursor hit an endpoint Railcore doesn't have a parser for. File an issue with the host + path from the audit record. |
+| Records appear with `vendor=""` | Cursor hit an endpoint Runveil doesn't have a parser for. File an issue with the host + path from the audit record. |

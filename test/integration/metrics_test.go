@@ -16,11 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"railcore/internal/audit"
-	"railcore/internal/ca"
-	"railcore/internal/metrics"
-	"railcore/internal/pipeline"
-	"railcore/internal/proxy"
+	"runveil/internal/audit"
+	"runveil/internal/ca"
+	"runveil/internal/metrics"
+	"runveil/internal/pipeline"
+	"runveil/internal/proxy"
 )
 
 func TestMetrics_E2E_RequestIncrementsCounter(t *testing.T) {
@@ -86,10 +86,10 @@ func TestMetrics_E2E_RequestIncrementsCounter(t *testing.T) {
 		rec := httptest.NewRecorder()
 		collector.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 		body = rec.Body.String()
-		if strings.Contains(body, `railcore_requests_total{decision="continue"} 1`) {
+		if strings.Contains(body, `runveil_requests_total{decision="continue"} 1`) {
 			return // success
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for railcore_requests_total to reach 1; last scrape:\n%s", body)
+	t.Fatalf("timed out waiting for runveil_requests_total to reach 1; last scrape:\n%s", body)
 }

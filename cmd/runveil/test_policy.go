@@ -6,13 +6,13 @@ import (
 	"fmt"
 	"os"
 
-	"railcore/internal/policy"
+	"runveil/internal/policy"
 )
 
 func runTestPolicy(args []string) {
 	fs := flag.NewFlagSet("test-policy", flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: railcore test-policy <path>\n")
+		fmt.Fprint(os.Stderr, "usage: runveil test-policy <path>\n")
 		fs.PrintDefaults()
 	}
 	_ = fs.Parse(args)

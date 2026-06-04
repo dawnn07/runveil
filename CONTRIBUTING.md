@@ -1,6 +1,6 @@
-# Contributing to Railcore
+# Contributing to Runveil
 
-Thank you for considering a contribution. Railcore is a small project
+Thank you for considering a contribution. Runveil is a small project
 with a security-sensitive surface area — the bar is "your patch makes
 the tool clearly better without making it less safe."
 
@@ -13,9 +13,9 @@ changes (typos, small bug fixes, documentation) — go straight to PR.
 ## Build & test
 
 ```sh
-git clone https://github.com/dawnn07/railcore.git
-cd railcore
-go build ./cmd/railcore
+git clone https://github.com/dawnn07/runveil.git
+cd runveil
+go build ./cmd/runveil
 go test ./... -race
 ```
 
@@ -28,7 +28,7 @@ For tests that drive the proxy end-to-end:
 go test ./test/integration/... -v
 ```
 
-These spawn a real `railcore` binary as a subprocess. Slow (10–30s) but
+These spawn a real `runveil` binary as a subprocess. Slow (10–30s) but
 catch a lot.
 
 ## Code style
@@ -88,7 +88,7 @@ get reverted.
 - Code without tests (unless it's docs / config)
 - Anything that silently weakens the security model (e.g. broader file
   permissions, weaker defaults, fewer warnings)
-- Features that require railcore to phone home or send telemetry
+- Features that require runveil to phone home or send telemetry
 - New CLI flags whose purpose is "make it work for my specific setup"
   — those should be config file options, environment variables, or
   upstream changes to the thing that's not working
@@ -98,7 +98,7 @@ get reverted.
 Use GitHub Issues for non-security bugs. Include:
 
 - Your OS + Go version
-- The `railcore version` output
+- The `runveil version` output
 - A minimal reproduction
 - What you expected vs. what you got
 

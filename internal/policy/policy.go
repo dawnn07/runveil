@@ -6,7 +6,7 @@
 package policy
 
 import (
-	"railcore/internal/detector"
+	"runveil/internal/detector"
 )
 
 // Action is what a policy decides to do with a single finding.

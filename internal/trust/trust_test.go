@@ -56,13 +56,13 @@ func TestShellQuote(t *testing.T) {
 }
 
 // TestInstall_RealTrustStore actually mutates the running machine's trust
-// store. Disabled by default; enable with RAILCORE_INTEGRATION=1.
+// store. Disabled by default; enable with RUNVEIL_INTEGRATION=1.
 //
 // The test installs and then uninstalls a freshly generated CA. It fails
 // loud if Install returns an error other than ErrNeedsManual.
 func TestInstall_RealTrustStore(t *testing.T) {
-	if os.Getenv("RAILCORE_INTEGRATION") != "1" {
-		t.Skip("set RAILCORE_INTEGRATION=1 to enable trust-store integration test")
+	if os.Getenv("RUNVEIL_INTEGRATION") != "1" {
+		t.Skip("set RUNVEIL_INTEGRATION=1 to enable trust-store integration test")
 	}
 
 	dir := t.TempDir()
@@ -88,7 +88,7 @@ func writeTestCA(path string) error {
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "Railcore Test CA"},
+		Subject:               pkix.Name{CommonName: "Runveil Test CA"},
 		NotBefore:             time.Now().Add(-time.Hour),
 		NotAfter:              time.Now().Add(24 * time.Hour),
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,

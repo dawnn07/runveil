@@ -56,7 +56,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     env:
-      RAILCORE_INTEGRATION: '1'
+      RUNVEIL_INTEGRATION: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -95,8 +95,8 @@ jobs:
         with:
           go-version: '1.25'
           cache: true
-      - run: go build -o railcore-${{ runner.os }}-${{ runner.arch }} ./cmd/railcore
+      - run: go build -o runveil-${{ runner.os }}-${{ runner.arch }} ./cmd/runveil
       - uses: actions/upload-artifact@v4
         with:
-          name: railcore-${{ runner.os }}-${{ runner.arch }}
-          path: railcore-${{ runner.os }}-${{ runner.arch }}*
+          name: runveil-${{ runner.os }}-${{ runner.arch }}
+          path: runveil-${{ runner.os }}-${{ runner.arch }}*

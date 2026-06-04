@@ -31,7 +31,7 @@ func (w *windowsInstaller) Install(caPath string) error {
 func (w *windowsInstaller) Uninstall(caPath string) error {
 	exec.Command("certutil", "-delstore", "Root", caPath).Run()
 	exec.Command("powershell", "-NoProfile", "-Command",
-		fmt.Sprintf(`Get-ChildItem Cert:\CurrentUser\Root | Where-Object { $_.Subject -like "*Railcore*" } | Remove-Item`)).Run()
+		fmt.Sprintf(`Get-ChildItem Cert:\CurrentUser\Root | Where-Object { $_.Subject -like "*Runveil*" } | Remove-Item`)).Run()
 	return nil
 }
 

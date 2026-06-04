@@ -18,11 +18,11 @@ import (
 	"testing"
 	"time"
 
-	"railcore/internal/ca"
-	"railcore/internal/pipeline"
-	"railcore/internal/policy"
-	"railcore/internal/proxy"
-	pathscanstage "railcore/internal/stage/pathscan"
+	"runveil/internal/ca"
+	"runveil/internal/pipeline"
+	"runveil/internal/policy"
+	"runveil/internal/proxy"
+	pathscanstage "runveil/internal/stage/pathscan"
 )
 
 func TestCursor_BYOK_OpenAIResponses_BlocksPayments(t *testing.T) {
@@ -104,8 +104,8 @@ rules:
 	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if got["error"] != "blocked by railcore policy" {
-		t.Errorf("error = %v, want 'blocked by railcore policy'", got["error"])
+	if got["error"] != "blocked by runveil policy" {
+		t.Errorf("error = %v, want 'blocked by runveil policy'", got["error"])
 	}
 	findings, ok := got["findings"].([]any)
 	if !ok || len(findings) == 0 {

@@ -20,20 +20,20 @@ import (
 	"testing"
 	"time"
 
-	"railcore/internal/audit"
-	"railcore/internal/ca"
-	"railcore/internal/enrollment"
-	"railcore/internal/pipeline"
-	"railcore/internal/policy"
-	"railcore/internal/proxy"
-	pathscanstage "railcore/internal/stage/pathscan"
+	"runveil/internal/audit"
+	"runveil/internal/ca"
+	"runveil/internal/enrollment"
+	"runveil/internal/pipeline"
+	"runveil/internal/policy"
+	"runveil/internal/proxy"
+	pathscanstage "runveil/internal/stage/pathscan"
 )
 
 func TestEnrollment_E2E_DeviceTokenAndOrgID(t *testing.T) {
 	// Ensure no env-var leakage from the test harness.
-	t.Setenv("RAILCORE_ORG_ID", "")
-	t.Setenv("RAILCORE_DEVICE_TOKEN", "")
-	t.Setenv("RAILCORE_POLICY_TOKEN", "")
+	t.Setenv("RUNVEIL_ORG_ID", "")
+	t.Setenv("RUNVEIL_DEVICE_TOKEN", "")
+	t.Setenv("RUNVEIL_POLICY_TOKEN", "")
 
 	// --- Upstream HTTPS server that the proxy will forward to. ---
 	upstream := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

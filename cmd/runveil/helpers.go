@@ -7,7 +7,7 @@ import (
 )
 
 func defaultPort() int {
-	if v := os.Getenv("RAILCORE_PORT"); v != "" {
+	if v := os.Getenv("RUNVEIL_PORT"); v != "" {
 		var p int
 		if _, err := fmt.Sscanf(v, "%d", &p); err == nil && p > 0 {
 			return p
@@ -18,7 +18,7 @@ func defaultPort() int {
 
 func defaultDataDir() string {
 	if home, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(home, ".railcore")
+		return filepath.Join(home, ".runveil")
 	}
-	return ".railcore-data"
+	return ".runveil-data"
 }

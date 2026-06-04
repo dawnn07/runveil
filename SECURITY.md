@@ -1,6 +1,6 @@
 # Security Policy
 
-Railcore intercepts HTTPS traffic and installs a local Certificate
+Runveil intercepts HTTPS traffic and installs a local Certificate
 Authority. Bugs in this code path can result in the loss of TLS
 guarantees for the user's browser, AI tools, and shell. We take
 reports seriously.
@@ -27,9 +27,9 @@ sooner.
 
 In scope:
 
-- The forward proxy (`railcore proxy`) — request handling, TLS
+- The forward proxy (`runveil proxy`) — request handling, TLS
   interception, certificate generation, header forwarding
-- The CA setup (`railcore init`) — key generation, file permissions,
+- The CA setup (`runveil init`) — key generation, file permissions,
   OS trust store installation
 - The detector stages (`internal/stage/*`) — secret scanning, path
   scanning, anything that processes request bodies
@@ -44,18 +44,18 @@ Out of scope:
   refuse to start without both flags together, and are intended only
   for the project's own integration tests. Using them in production is
   your problem, not ours.
-- Third-party tools that talk to railcore (Claude Code, Cursor, etc.).
+- Third-party tools that talk to runveil (Claude Code, Cursor, etc.).
   Report issues there to those projects.
 - Vulnerabilities that require the attacker to already have write
   access to the user's home directory or root on the machine. (At that
-  point the attacker can install any CA they want — railcore is not
+  point the attacker can install any CA they want — runveil is not
   the weak link.)
 
 ## What a fix typically looks like
 
-A CVE-worthy bug in railcore is patched, a release tagged, and the
+A CVE-worthy bug in runveil is patched, a release tagged, and the
 release notes call out the issue. Older releases are not patched —
 upgrade to the fixed version.
 
-If you're packaging railcore for a distro, please subscribe to the
+If you're packaging runveil for a distro, please subscribe to the
 GitHub releases feed.

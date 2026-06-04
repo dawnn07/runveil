@@ -1,4 +1,4 @@
-// Package proxy implements the Railcore forward HTTPS proxy.
+// Package proxy implements the Runveil forward HTTPS proxy.
 package proxy
 
 import (
@@ -17,9 +17,9 @@ import (
 
 	"github.com/google/uuid"
 
-	"railcore/internal/audit"
-	"railcore/internal/ca"
-	"railcore/internal/pipeline"
+	"runveil/internal/audit"
+	"runveil/internal/ca"
+	"runveil/internal/pipeline"
 )
 
 // Config configures a Server. All fields are required unless documented.
@@ -44,7 +44,7 @@ type Config struct {
 	AuditFunc audit.Logger
 }
 
-// Server is the Railcore forward HTTPS proxy.
+// Server is the Runveil forward HTTPS proxy.
 type Server struct {
 	cfg Config
 	log *slog.Logger

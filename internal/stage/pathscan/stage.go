@@ -10,10 +10,10 @@ import (
 	"encoding/json"
 	"log/slog"
 
-	"railcore/internal/parser"
-	"railcore/internal/pathscan"
-	"railcore/internal/pipeline"
-	"railcore/internal/policy"
+	"runveil/internal/parser"
+	"runveil/internal/pathscan"
+	"runveil/internal/pipeline"
+	"runveil/internal/policy"
 )
 
 // Config controls the stage's runtime behavior.
