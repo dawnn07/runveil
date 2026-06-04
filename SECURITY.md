@@ -9,7 +9,10 @@ reports seriously.
 
 **Please do not file public GitHub issues for security vulnerabilities.**
 
-Email: **haidangdavid123@gmail.com**
+Report privately through GitHub's [Private Vulnerability
+Reporting](https://github.com/dawnn07/runveil/security/advisories/new)
+(repository **Security** tab → **Report a vulnerability**). This keeps
+the report confidential until a fix is coordinated.
 
 Include:
 
