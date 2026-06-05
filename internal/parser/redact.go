@@ -8,6 +8,9 @@ import (
 
 const redactMask = "[REDACTED]"
 
+var anthropicTextTypes = map[string]bool{"text": true}
+var openAITextTypes = map[string]bool{"text": true, "input_text": true, "output_text": true}
+
 // Span is a half-open [Offset, Offset+Length) range within a decoded
 // content string to replace with the redaction mask.
 type Span struct {
@@ -67,7 +70,7 @@ func redactAnthropic(body []byte, reds []Redaction) ([]byte, error) {
 	applied := make([]bool, len(reds))
 
 	if sysRaw, ok := top["system"]; ok {
-		newRaw, err := redactContent("system", -1, sysRaw, reds, applied)
+		newRaw, err := redactContent("system", -1, sysRaw, reds, applied, anthropicTextTypes)
 		if err != nil {
 			return nil, err
 		}
@@ -75,37 +78,9 @@ func redactAnthropic(body []byte, reds []Redaction) ([]byte, error) {
 	}
 
 	if msgsRaw, ok := top["messages"]; ok {
-		var msgs []json.RawMessage
-		if err := json.Unmarshal(msgsRaw, &msgs); err != nil {
-			return nil, fmt.Errorf("redact: decode messages: %w", err)
-		}
-		for i := range msgs {
-			var msg map[string]json.RawMessage
-			if err := json.Unmarshal(msgs[i], &msg); err != nil {
-				return nil, fmt.Errorf("redact: decode message %d: %w", i, err)
-			}
-			role := ""
-			if rRaw, ok := msg["role"]; ok {
-				_ = json.Unmarshal(rRaw, &role)
-			}
-			cRaw, ok := msg["content"]
-			if !ok {
-				continue
-			}
-			newRaw, err := redactContent(role, i, cRaw, reds, applied)
-			if err != nil {
-				return nil, err
-			}
-			msg["content"] = newRaw
-			remarshaled, err := json.Marshal(msg)
-			if err != nil {
-				return nil, fmt.Errorf("redact: re-encode message %d: %w", i, err)
-			}
-			msgs[i] = remarshaled
-		}
-		newMsgs, err := json.Marshal(msgs)
+		newMsgs, err := redactMessageArray(msgsRaw, reds, applied, anthropicTextTypes)
 		if err != nil {
-			return nil, fmt.Errorf("redact: re-encode messages: %w", err)
+			return nil, err
 		}
 		top["messages"] = newMsgs
 	}
@@ -118,10 +93,46 @@ func redactAnthropic(body []byte, reds []Redaction) ([]byte, error) {
 	return json.Marshal(top)
 }
 
+// redactMessageArray applies reds to the `content` of each object in a
+// JSON array of {role, content} messages, re-encoding losslessly. Used
+// by both Anthropic /v1/messages and OpenAI /v1/chat/completions.
+func redactMessageArray(msgsRaw json.RawMessage, reds []Redaction, applied []bool, textTypes map[string]bool) (json.RawMessage, error) {
+	var msgs []json.RawMessage
+	if err := json.Unmarshal(msgsRaw, &msgs); err != nil {
+		return nil, fmt.Errorf("redact: decode messages: %w", err)
+	}
+	for i := range msgs {
+		var msg map[string]json.RawMessage
+		if err := json.Unmarshal(msgs[i], &msg); err != nil {
+			return nil, fmt.Errorf("redact: decode message %d: %w", i, err)
+		}
+		cRaw, ok := msg["content"]
+		if !ok {
+			continue
+		}
+		role := ""
+		if rRaw, ok := msg["role"]; ok {
+			_ = json.Unmarshal(rRaw, &role)
+		}
+		newRaw, err := redactContent(role, i, cRaw, reds, applied, textTypes)
+		if err != nil {
+			return nil, err
+		}
+		msg["content"] = newRaw
+		reEnc, err := json.Marshal(msg)
+		if err != nil {
+			return nil, fmt.Errorf("redact: re-encode message %d: %w", i, err)
+		}
+		msgs[i] = reEnc
+	}
+	return json.Marshal(msgs)
+}
+
 // redactContent masks redactions targeting (role, index) within one
 // content value (a JSON string or an array of blocks). Only top-level
-// string content and top-level {"type":"text"} blocks are redactable.
-func redactContent(role string, index int, raw json.RawMessage, reds []Redaction, applied []bool) (json.RawMessage, error) {
+// string content and top-level blocks whose type is in textTypes are
+// redactable.
+func redactContent(role string, index int, raw json.RawMessage, reds []Redaction, applied []bool, textTypes map[string]bool) (json.RawMessage, error) {
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
 		newS, changed, err := maybeRedact(role, index, s, reds, applied)
@@ -148,7 +159,7 @@ func redactContent(role string, index int, raw json.RawMessage, reds []Redaction
 		if tRaw, ok := blk["type"]; ok {
 			_ = json.Unmarshal(tRaw, &bType)
 		}
-		if bType != "text" {
+		if !textTypes[bType] {
 			continue
 		}
 		var txt string
