@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -277,25 +278,54 @@ func redactContent(role string, index int, raw json.RawMessage, reds []Redaction
 		if tRaw, ok := blk["type"]; ok {
 			_ = json.Unmarshal(tRaw, &bType)
 		}
-		if !textTypes[bType] {
+
+		switch {
+		case textTypes[bType]:
+			var txt string
+			if tRaw, ok := blk["text"]; ok {
+				_ = json.Unmarshal(tRaw, &txt)
+			}
+			newTxt, changed, err := maybeRedact(role, index, txt, reds, applied)
+			if err != nil {
+				return nil, err
+			}
+			if !changed {
+				continue
+			}
+			enc, err := json.Marshal(newTxt)
+			if err != nil {
+				return nil, err
+			}
+			blk["text"] = enc
+
+		case bType == "tool_use":
+			newInput, changed, err := redactToolUseInput(blk["input"], role, index, reds, applied)
+			if err != nil {
+				return nil, err
+			}
+			if !changed {
+				continue
+			}
+			blk["input"] = newInput
+
+		case bType == "tool_result":
+			cRaw, ok := blk["content"]
+			if !ok {
+				continue
+			}
+			newContent, err := redactContent(role, index, cRaw, reds, applied, textTypes)
+			if err != nil {
+				return nil, err
+			}
+			if bytes.Equal(newContent, cRaw) {
+				continue
+			}
+			blk["content"] = newContent
+
+		default:
 			continue
 		}
-		var txt string
-		if tRaw, ok := blk["text"]; ok {
-			_ = json.Unmarshal(tRaw, &txt)
-		}
-		newTxt, changed, err := maybeRedact(role, index, txt, reds, applied)
-		if err != nil {
-			return nil, err
-		}
-		if !changed {
-			continue
-		}
-		enc, err := json.Marshal(newTxt)
-		if err != nil {
-			return nil, err
-		}
-		blk["text"] = enc
+
 		reEnc, err := json.Marshal(blk)
 		if err != nil {
 			return nil, err
@@ -307,6 +337,29 @@ func redactContent(role string, index int, raw json.RawMessage, reds []Redaction
 		return raw, nil
 	}
 	return json.Marshal(blocks)
+}
+
+// redactToolUseInput masks redactions matching (role, index) inside a
+// tool_use block's input object. The input's raw JSON bytes are the
+// segment content (matching how the parser extracts tool_use input). The
+// masked result must stay valid JSON, or it errors so the caller fails
+// closed. Returns the new input bytes and whether anything changed.
+func redactToolUseInput(inputRaw json.RawMessage, role string, index int, reds []Redaction, applied []bool) (json.RawMessage, bool, error) {
+	if len(inputRaw) == 0 {
+		return inputRaw, false, nil
+	}
+	content := string(inputRaw)
+	newContent, changed, err := maybeRedact(role, index, content, reds, applied)
+	if err != nil {
+		return nil, false, err
+	}
+	if !changed {
+		return inputRaw, false, nil
+	}
+	if !json.Valid([]byte(newContent)) {
+		return nil, false, fmt.Errorf("redact: tool_use input not valid JSON after masking")
+	}
+	return json.RawMessage(newContent), true, nil
 }
 
 // maybeRedact applies every redaction whose (Role, Index, Content) equals

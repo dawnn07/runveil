@@ -91,13 +91,59 @@ func TestRedact_UnmatchedIsError(t *testing.T) {
 	}
 }
 
-func TestRedact_ToolUseTargetIsError(t *testing.T) {
-	host, path := anthReq()
+func TestRedact_ToolUseInput(t *testing.T) {
+	host, path := "api.anthropic.com", "/v1/messages"
 	body := []byte(`{"messages":[{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"k":"AKIAIOSFODNN7EXAMPLE"}}]}]}`)
 	content := `{"k":"AKIAIOSFODNN7EXAMPLE"}`
-	_, err := RedactRequest(host, path, body, []Redaction{red("assistant", 0, content, 6, 20)})
+	out, err := RedactRequest(host, path, body, []Redaction{red("assistant", 0, content, 6, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived in tool_use input: %s", out)
+	}
+	if !strings.Contains(string(out), "[REDACTED]") {
+		t.Errorf("mask missing: %s", out)
+	}
+	if !json.Valid(out) {
+		t.Errorf("output not valid JSON: %s", out)
+	}
+	if !strings.Contains(string(out), `"Read"`) {
+		t.Errorf("tool name lost: %s", out)
+	}
+}
+
+func TestRedact_ToolUseInvalidJSONIsError(t *testing.T) {
+	host, path := "api.anthropic.com", "/v1/messages"
+	body := []byte(`{"messages":[{"role":"assistant","content":[{"type":"tool_use","name":"f","input":{"k":"SECRET"}}]}]}`)
+	content := `{"k":"SECRET"}`
+	_, err := RedactRequest(host, path, body, []Redaction{red("assistant", 0, content, 5, 8)})
 	if err == nil {
-		t.Error("expected error: tool_use input is not redactable in v1")
+		t.Error("expected error: masking broke tool_use input JSON validity")
+	}
+}
+
+func TestRedact_ToolResultNestedText(t *testing.T) {
+	host, path := "api.anthropic.com", "/v1/messages"
+	body := []byte(`{"messages":[{"role":"user","content":[{"type":"tool_result","content":[{"type":"text","text":"out AKIAIOSFODNN7EXAMPLE"}]}]}]}`)
+	out, err := RedactRequest(host, path, body, []Redaction{red("user", 0, "out AKIAIOSFODNN7EXAMPLE", 4, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived in nested tool_result text: %s", out)
+	}
+}
+
+func TestRedact_ToolResultStringContent(t *testing.T) {
+	host, path := "api.anthropic.com", "/v1/messages"
+	body := []byte(`{"messages":[{"role":"user","content":[{"type":"tool_result","content":"res AKIAIOSFODNN7EXAMPLE end"}]}]}`)
+	out, err := RedactRequest(host, path, body, []Redaction{red("user", 0, "res AKIAIOSFODNN7EXAMPLE end", 4, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived in tool_result string content: %s", out)
 	}
 }
 
