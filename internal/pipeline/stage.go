@@ -19,8 +19,10 @@ const (
 	// Block halts the chain. The proxy returns 403 to the client without
 	// dialling upstream.
 	Block
-	// Modify is a hint that the current stage mutated rc.Req. The proxy
-	// treats Modify identically to Continue in this release.
+	// Modify means a stage mutated the request (e.g. redacted the body in
+	// rc.Metadata). The request still proceeds upstream like Continue, but
+	// the chain propagates Modify so the proxy can record it in the audit
+	// decision and forward the mutated body.
 	Modify
 )
 
