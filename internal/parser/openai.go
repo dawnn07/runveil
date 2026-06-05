@@ -47,6 +47,20 @@ func parseOpenAIChat(body []byte) (*ParsedRequest, error) {
 				Content: seg,
 			})
 		}
+		for _, tc := range m.ToolCalls {
+			if tc.Type != "function" {
+				continue
+			}
+			args := decodeOpenAIArguments(tc.Function.Arguments)
+			if len(args) == 0 {
+				continue
+			}
+			texts = append(texts, TextSegment{
+				Role:    m.Role,
+				Index:   i,
+				Content: string(args),
+			})
+		}
 	}
 
 	return &ParsedRequest{

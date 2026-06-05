@@ -80,6 +80,16 @@ func parseOpenAIResponses(body []byte) (*ParsedRequest, error) {
 						}
 					}
 				}
+				if itemType == "function_call" {
+					args := decodeOpenAIArguments(item["arguments"])
+					if len(args) > 0 {
+						texts = append(texts, TextSegment{
+							Role:    "assistant",
+							Index:   i,
+							Content: string(args),
+						})
+					}
+				}
 			}
 		}
 	}
