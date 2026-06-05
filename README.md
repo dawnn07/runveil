@@ -131,10 +131,9 @@ order; the first match wins. Actions are `allow`, `warn`, `block`, or
 `redact`. `redact` strips the matched secret from the request (replacing
 it with `[REDACTED]`) and forwards the rest; if it cannot be applied
 safely the request is blocked instead. Redaction currently covers
-Anthropic `/v1/messages` (prose and tool-call inputs) and OpenAI
-`/v1/chat/completions` + `/v1/responses` (prose; secrets inside OpenAI
-tool-call arguments still block). On unsupported endpoints a `redact`
-rule blocks.
+Anthropic `/v1/messages` and OpenAI `/v1/chat/completions` +
+`/v1/responses` — prose and tool-call inputs on all three. On
+unsupported endpoints a `redact` rule blocks.
 
 A few useful matchers:
 

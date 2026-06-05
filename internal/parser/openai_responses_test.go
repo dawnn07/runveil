@@ -35,14 +35,17 @@ func TestResponses_ArrayInputBasic(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseOpenAIResponses: %v", err)
 	}
-	if len(parsed.Texts) != 2 {
-		t.Fatalf("Texts len = %d, want 2; got %+v", len(parsed.Texts), parsed.Texts)
+	if len(parsed.Texts) != 3 {
+		t.Fatalf("Texts len = %d, want 3; got %+v", len(parsed.Texts), parsed.Texts)
 	}
-	if parsed.Texts[0].Role != "user" || parsed.Texts[0].Content != "fix the bug" {
-		t.Errorf("Texts[0] = %+v; want user 'fix the bug'", parsed.Texts[0])
+	if parsed.Texts[0].Role != "user" || parsed.Texts[0].Content != "fix the bug" || parsed.Texts[0].Index != 0 {
+		t.Errorf("Texts[0] = %+v; want user/0/'fix the bug'", parsed.Texts[0])
 	}
-	if parsed.Texts[1].Role != "tool" || parsed.Texts[1].Content != "file body contents" {
-		t.Errorf("Texts[1] = %+v; want tool 'file body contents'", parsed.Texts[1])
+	if parsed.Texts[1].Role != "assistant" || parsed.Texts[1].Content != `{"path":"/src/payments/charge.go"}` || parsed.Texts[1].Index != 1 {
+		t.Errorf("Texts[1] = %+v; want assistant/1/'{\"path\":\"/src/payments/charge.go\"}'", parsed.Texts[1])
+	}
+	if parsed.Texts[2].Role != "tool" || parsed.Texts[2].Content != "file body contents" || parsed.Texts[2].Index != 2 {
+		t.Errorf("Texts[2] = %+v; want tool/2/'file body contents'", parsed.Texts[2])
 	}
 	tus := extractOpenAIResponsesToolUses(body)
 	if len(tus) != 1 {
@@ -117,5 +120,25 @@ func TestResponses_MalformedFunctionCallArguments(t *testing.T) {
 	}
 	if string(tus[0].Input) != "not valid json" {
 		t.Errorf("Input = %q, want raw bytes", string(tus[0].Input))
+	}
+}
+
+func TestOpenAIResponses_FunctionCallArgumentsScanned(t *testing.T) {
+	body := []byte(`{"input":[{"type":"function_call","name":"f","arguments":"{\"token\":\"AKIAIOSFODNN7EXAMPLE\"}"}]}`)
+	parsed, err := ParseRequest("api.openai.com", postReq(t, "/v1/responses"), body)
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	var found *TextSegment
+	for i := range parsed.Texts {
+		if parsed.Texts[i].Content == `{"token":"AKIAIOSFODNN7EXAMPLE"}` {
+			found = &parsed.Texts[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("decoded function_call arguments not emitted; got %+v", parsed.Texts)
+	}
+	if found.Role != "assistant" || found.Index != 0 {
+		t.Errorf("segment role/index = %s/%d, want assistant/0", found.Role, found.Index)
 	}
 }
