@@ -34,9 +34,11 @@ func (c *Chain) Register(s Stage) {
 }
 
 // Run executes each stage in order. The first stage to return Block halts
-// the chain and Run returns Block. Stages that panic or return a non-nil
-// error are logged and treated as Continue (fail-open).
+// the chain and Run returns Block. If any stage returns Modify the chain
+// returns Modify after all stages complete. Stages that panic or return a
+// non-nil error are logged and treated as Continue (fail-open).
 func (c *Chain) Run(ctx context.Context, rc *RequestCtx) (Decision, error) {
+	result := Continue
 	for _, s := range c.stages {
 		dec, err := c.runStage(ctx, s, rc)
 		if dec == Block {
@@ -50,10 +52,11 @@ func (c *Chain) Run(ctx context.Context, rc *RequestCtx) (Decision, error) {
 			// Treat as Continue (fail-open).
 			continue
 		}
-		// Continue or Modify both proceed; nothing to do.
-		_ = dec
+		if dec == Modify {
+			result = Modify
+		}
 	}
-	return Continue, nil
+	return result, nil
 }
 
 func (c *Chain) runStage(ctx context.Context, s Stage, rc *RequestCtx) (dec Decision, err error) {
