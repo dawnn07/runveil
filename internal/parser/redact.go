@@ -44,6 +44,8 @@ func RedactRequest(host, path string, body []byte, reds []Redaction) ([]byte, er
 		return redactAnthropic(body, reds)
 	case host == "api.openai.com" && path == "/v1/chat/completions":
 		return redactOpenAIChat(body, reds)
+	case host == "api.openai.com" && path == "/v1/responses":
+		return redactOpenAIResponses(body, reds)
 	default:
 		return nil, fmt.Errorf("redact: unsupported endpoint %s%s", host, path)
 	}
@@ -64,6 +66,95 @@ func redactOpenAIChat(body []byte, reds []Redaction) ([]byte, error) {
 		}
 		top["messages"] = newMsgs
 	}
+	for k, done := range applied {
+		if !done {
+			return nil, fmt.Errorf("redact: content for %s[%d] not found as redactable prose", reds[k].Role, reds[k].Index)
+		}
+	}
+	return json.Marshal(top)
+}
+
+// redactOpenAIResponses rebuilds an OpenAI /v1/responses body with reds
+// applied to instructions, input prose, and function_call_output text.
+// function_call (tool argument) items are left untouched.
+func redactOpenAIResponses(body []byte, reds []Redaction) ([]byte, error) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(body, &top); err != nil {
+		return nil, fmt.Errorf("redact: decode body: %w", err)
+	}
+	applied := make([]bool, len(reds))
+
+	if instrRaw, ok := top["instructions"]; ok {
+		newRaw, err := redactContent("system", -1, instrRaw, reds, applied, openAITextTypes)
+		if err != nil {
+			return nil, err
+		}
+		top["instructions"] = newRaw
+	}
+
+	if inputRaw, ok := top["input"]; ok {
+		var s string
+		if err := json.Unmarshal(inputRaw, &s); err == nil {
+			newRaw, err := redactContent("user", 0, inputRaw, reds, applied, openAITextTypes)
+			if err != nil {
+				return nil, err
+			}
+			top["input"] = newRaw
+		} else {
+			var items []json.RawMessage
+			if err := json.Unmarshal(inputRaw, &items); err != nil {
+				return nil, fmt.Errorf("redact: decode input: %w", err)
+			}
+			for i := range items {
+				var item map[string]json.RawMessage
+				if err := json.Unmarshal(items[i], &item); err != nil {
+					return nil, fmt.Errorf("redact: decode input item %d: %w", i, err)
+				}
+				if roleRaw, ok := item["role"]; ok {
+					var role string
+					_ = json.Unmarshal(roleRaw, &role)
+					cRaw, hasContent := item["content"]
+					if role != "" && hasContent {
+						newC, err := redactContent(role, i, cRaw, reds, applied, openAITextTypes)
+						if err != nil {
+							return nil, err
+						}
+						item["content"] = newC
+						reEnc, err := json.Marshal(item)
+						if err != nil {
+							return nil, fmt.Errorf("redact: re-encode input item %d: %w", i, err)
+						}
+						items[i] = reEnc
+					}
+					continue
+				}
+				var itemType string
+				if tRaw, ok := item["type"]; ok {
+					_ = json.Unmarshal(tRaw, &itemType)
+				}
+				if itemType == "function_call_output" {
+					if outRaw, ok := item["output"]; ok {
+						newOut, err := redactContent("tool", i, outRaw, reds, applied, openAITextTypes)
+						if err != nil {
+							return nil, err
+						}
+						item["output"] = newOut
+						reEnc, err := json.Marshal(item)
+						if err != nil {
+							return nil, fmt.Errorf("redact: re-encode input item %d: %w", i, err)
+						}
+						items[i] = reEnc
+					}
+				}
+			}
+			newItems, err := json.Marshal(items)
+			if err != nil {
+				return nil, fmt.Errorf("redact: re-encode input: %w", err)
+			}
+			top["input"] = newItems
+		}
+	}
+
 	for k, done := range applied {
 		if !done {
 			return nil, fmt.Errorf("redact: content for %s[%d] not found as redactable prose", reds[k].Role, reds[k].Index)

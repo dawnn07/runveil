@@ -153,3 +153,51 @@ func TestRedact_OpenAIChat_ToolArgsTargetIsError(t *testing.T) {
 		t.Error("expected fail-closed error: tool_calls arguments not redactable here")
 	}
 }
+
+func TestRedact_OpenAIResponses_Instructions(t *testing.T) {
+	host, path := "api.openai.com", "/v1/responses"
+	body := []byte(`{"instructions":"sys AKIAIOSFODNN7EXAMPLE","input":"hello"}`)
+	out, err := RedactRequest(host, path, body, []Redaction{red("system", -1, "sys AKIAIOSFODNN7EXAMPLE", 4, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived in instructions: %s", out)
+	}
+}
+
+func TestRedact_OpenAIResponses_InputString(t *testing.T) {
+	host, path := "api.openai.com", "/v1/responses"
+	body := []byte(`{"input":"key AKIAIOSFODNN7EXAMPLE end"}`)
+	out, err := RedactRequest(host, path, body, []Redaction{red("user", 0, "key AKIAIOSFODNN7EXAMPLE end", 4, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived in input: %s", out)
+	}
+}
+
+func TestRedact_OpenAIResponses_InputArrayItem(t *testing.T) {
+	host, path := "api.openai.com", "/v1/responses"
+	body := []byte(`{"input":[{"role":"user","content":[{"type":"input_text","text":"tok AKIAIOSFODNN7EXAMPLE"}]}]}`)
+	out, err := RedactRequest(host, path, body, []Redaction{red("user", 0, "tok AKIAIOSFODNN7EXAMPLE", 4, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived in input item: %s", out)
+	}
+}
+
+func TestRedact_OpenAIResponses_FunctionCallOutput(t *testing.T) {
+	host, path := "api.openai.com", "/v1/responses"
+	body := []byte(`{"input":[{"type":"function_call_output","output":"res AKIAIOSFODNN7EXAMPLE done"}]}`)
+	out, err := RedactRequest(host, path, body, []Redaction{red("tool", 0, "res AKIAIOSFODNN7EXAMPLE done", 4, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived in function_call_output: %s", out)
+	}
+}
