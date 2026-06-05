@@ -36,9 +36,13 @@ rules:
     action: redact
 `
 
-// setupRedactProxy stands up an in-process proxy with the secretscan stage
-// using a redact-aws policy, wired to a stub TLS upstream that records its
-// request body. It also enables audit logging.
+// setupRedactProxyForHost stands up an in-process proxy with the secretscan
+// stage using a redact-aws policy, wired to a stub TLS upstream that records
+// its request body. It also enables audit logging.
+//
+// targetHost is the hostname the http.Client will CONNECT through the proxy
+// (e.g. "api.anthropic.com" or "api.openai.com"); the proxy redirects all
+// traffic to the local stub regardless.
 //
 // Returns:
 //   - client: an *http.Client that routes traffic through the proxy
@@ -46,7 +50,7 @@ rules:
 //     stub upstream observed for the first request
 //   - auditPath: path to the audit log file
 //   - cleanup: must be called (defer is fine) to tear everything down
-func setupRedactProxy(t *testing.T) (client *http.Client, upstreamBodyCh <-chan []byte, auditPath string, cleanup func()) {
+func setupRedactProxyForHost(t *testing.T, targetHost string) (client *http.Client, upstreamBodyCh <-chan []byte, auditPath string, cleanup func()) {
 	t.Helper()
 
 	bodyCh := make(chan []byte, 1)
@@ -113,7 +117,7 @@ func setupRedactProxy(t *testing.T) (client *http.Client, upstreamBodyCh <-chan 
 	client = &http.Client{
 		Transport: &http.Transport{
 			Proxy:           http.ProxyURL(proxyURL),
-			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: "api.anthropic.com"},
+			TLSClientConfig: &tls.Config{RootCAs: caPool, ServerName: targetHost},
 		},
 		Timeout: 10 * time.Second,
 	}
@@ -128,6 +132,13 @@ func setupRedactProxy(t *testing.T) (client *http.Client, upstreamBodyCh <-chan 
 		})
 	}
 	return client, bodyCh, auditPath, cleanup
+}
+
+// setupRedactProxy is a convenience wrapper around setupRedactProxyForHost
+// for callers that target api.anthropic.com.
+func setupRedactProxy(t *testing.T) (client *http.Client, upstreamBodyCh <-chan []byte, auditPath string, cleanup func()) {
+	t.Helper()
+	return setupRedactProxyForHost(t, "api.anthropic.com")
 }
 
 // TestRedact_AnthropicEndToEnd verifies the full redact flow end-to-end:
@@ -189,5 +200,68 @@ func TestRedact_AnthropicEndToEnd(t *testing.T) {
 	}
 	if r.Host != "api.anthropic.com" {
 		t.Errorf("audit host = %q, want api.anthropic.com", r.Host)
+	}
+}
+
+// TestRedact_OpenAIChatEndToEnd verifies the full redact flow end-to-end for
+// an OpenAI /v1/chat/completions request:
+//  1. sends a request body containing a fake AWS key through the proxy;
+//  2. checks the upstream never saw the raw secret (only [REDACTED]);
+//  3. checks the proxy forwarded rather than blocked;
+//  4. checks the audit log records decision:"modify".
+func TestRedact_OpenAIChatEndToEnd(t *testing.T) {
+	client, upstreamBodyCh, auditPath, cleanup := setupRedactProxyForHost(t, "api.openai.com")
+	defer cleanup()
+
+	const fakeKey = "AKIAIOSFODNN7EXAMPLE"
+	reqBody := `{"model":"gpt-4o","messages":[{"role":"user","content":"my key ` + fakeKey + ` thanks"}]}`
+
+	resp, err := client.Post(
+		"https://api.openai.com/v1/chat/completions",
+		"application/json",
+		bytes.NewBufferString(reqBody),
+	)
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	// 1. The proxy must forward (not block).
+	if resp.StatusCode == http.StatusForbidden {
+		t.Fatalf("proxy returned 403; expected forwarding for redact action")
+	}
+
+	// 2. The upstream must have received the redacted body, not the raw secret.
+	var upstreamRaw []byte
+	select {
+	case upstreamRaw = <-upstreamBodyCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream did not receive the request within 5s")
+	}
+
+	if bytes.Contains(upstreamRaw, []byte(fakeKey)) {
+		t.Errorf("upstream body still contains the secret %q; upstream body: %s", fakeKey, upstreamRaw)
+	}
+	if !bytes.Contains(upstreamRaw, []byte("[REDACTED]")) {
+		t.Errorf("upstream body does not contain [REDACTED]; upstream body: %s", upstreamRaw)
+	}
+
+	// 3. The audit log must record decision:"modify".
+	// waitForAuditRecords and readAuditRecords are defined in audit_test.go
+	// (same package). The audit write is async (background goroutine flush),
+	// so we poll briefly.
+	records := waitForAuditRecords(t, auditPath, 1, 3*time.Second)
+	cleanup() // flush before asserting
+
+	if len(records) == 0 {
+		t.Fatal("no audit records written")
+	}
+	r := records[0]
+	if r.Decision != "modify" {
+		t.Errorf("audit decision = %q, want %q", r.Decision, "modify")
+	}
+	if r.Host != "api.openai.com" {
+		t.Errorf("audit host = %q, want api.openai.com", r.Host)
 	}
 }
