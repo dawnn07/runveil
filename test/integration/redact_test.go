@@ -344,3 +344,84 @@ func TestRedact_AnthropicToolUseEndToEnd(t *testing.T) {
 		t.Errorf("audit host = %q, want api.anthropic.com", r.Host)
 	}
 }
+
+// TestRedact_OpenAIToolArgsEndToEnd verifies that the redact policy correctly
+// scrubs a secret embedded inside an OpenAI tool_calls function arguments
+// string while preserving non-secret fields and keeping the body valid JSON:
+//  1. sends a /v1/chat/completions body with a tool_calls entry whose arguments
+//     JSON string contains a fake AWS key through the proxy;
+//  2. checks the upstream never saw the raw secret (only [REDACTED]);
+//  3. checks that "cmd":"ls" (a non-secret argument) survived;
+//  4. checks the upstream body is valid JSON;
+//  5. checks the proxy forwarded rather than blocked;
+//  6. checks the audit log records decision:"modify".
+func TestRedact_OpenAIToolArgsEndToEnd(t *testing.T) {
+	client, upstreamBodyCh, auditPath, cleanup := setupRedactProxyForHost(t, "api.openai.com")
+	defer cleanup()
+
+	const fakeKey = "AKIAIOSFODNN7EXAMPLE"
+	reqBody := `{"model":"gpt-4o","messages":[{"role":"assistant","tool_calls":[{"id":"c1","type":"function","function":{"name":"run","arguments":"{\"cmd\":\"ls\",\"token\":\"` + fakeKey + `\"}"}}]}]}`
+
+	resp, err := client.Post(
+		"https://api.openai.com/v1/chat/completions",
+		"application/json",
+		bytes.NewBufferString(reqBody),
+	)
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	// 1. The proxy must forward (not block).
+	if resp.StatusCode == http.StatusForbidden {
+		t.Fatalf("proxy returned 403; expected forwarding for redact action")
+	}
+
+	// 2. Collect the body the stub upstream observed.
+	var upstreamRaw []byte
+	select {
+	case upstreamRaw = <-upstreamBodyCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("upstream did not receive the request within 5s")
+	}
+
+	// 3. The secret must have been redacted.
+	if bytes.Contains(upstreamRaw, []byte(fakeKey)) {
+		t.Errorf("upstream body still contains the secret %q; upstream body: %s", fakeKey, upstreamRaw)
+	}
+	if !bytes.Contains(upstreamRaw, []byte("[REDACTED]")) {
+		t.Errorf("upstream body does not contain [REDACTED]; upstream body: %s", upstreamRaw)
+	}
+
+	// 4. The non-secret tool argument must have survived.
+	if !bytes.Contains(upstreamRaw, []byte("cmd")) {
+		t.Errorf(`upstream body missing "cmd" key; upstream body: %s`, upstreamRaw)
+	}
+	if !bytes.Contains(upstreamRaw, []byte("ls")) {
+		t.Errorf(`upstream body missing "ls" value; upstream body: %s`, upstreamRaw)
+	}
+
+	// 5. The upstream body must still be valid JSON.
+	if !json.Valid(upstreamRaw) {
+		t.Errorf("upstream body is not valid JSON; upstream body: %s", upstreamRaw)
+	}
+
+	// 6. The audit log must record decision:"modify".
+	// waitForAuditRecords and readAuditRecords are defined in audit_test.go
+	// (same package). The audit write is async (background goroutine flush),
+	// so we poll briefly.
+	toolRecords := waitForAuditRecords(t, auditPath, 1, 3*time.Second)
+	cleanup() // flush before asserting
+
+	if len(toolRecords) == 0 {
+		t.Fatal("no audit records written")
+	}
+	tr := toolRecords[0]
+	if tr.Decision != "modify" {
+		t.Errorf("audit decision = %q, want %q", tr.Decision, "modify")
+	}
+	if tr.Host != "api.openai.com" {
+		t.Errorf("audit host = %q, want api.openai.com", tr.Host)
+	}
+}
