@@ -857,3 +857,9 @@ func TestPolicy_RuleCount(t *testing.T) {
 		})
 	}
 }
+
+func TestActionRedactString(t *testing.T) {
+	if ActionRedact.String() != "redact" {
+		t.Errorf("ActionRedact.String() = %q, want redact", ActionRedact.String())
+	}
+}
