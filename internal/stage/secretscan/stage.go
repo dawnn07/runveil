@@ -37,7 +37,16 @@ type EnrichedFinding struct {
 	Finding      detector.Finding
 	Role         string
 	MessageIndex int
+	SegmentText  string // decoded text the finding was located in; for redact
 	Rule         string // name of the rule that decided this finding; "" if no policy in use
+}
+
+// redactKey uniquely identifies one segment for deduplication when building
+// the redaction list.
+type redactKey struct {
+	role  string
+	index int
+	text  string
 }
 
 // MarshalJSON emits the public shape used in 403 responses and audit logs.
@@ -104,6 +113,7 @@ func (s *Stage) Process(ctx context.Context, rc *pipeline.RequestCtx) (pipeline.
 				Finding:      f,
 				Role:         seg.Role,
 				MessageIndex: seg.Index,
+				SegmentText:  seg.Content,
 			})
 		}
 	}
@@ -177,6 +187,8 @@ func (s *Stage) decideWithPolicy(rc *pipeline.RequestCtx, parsed *parser.ParsedR
 	var blockPatterns []string
 	var highCount, medCount, lowCount int
 	anyBlock := false
+	redByKey := map[redactKey]*parser.Redaction{}
+	var redOrder []redactKey
 
 	for _, f := range raw {
 		action, rule := pol.Decide(f.Finding)
@@ -199,6 +211,17 @@ func (s *Stage) decideWithPolicy(rc *pipeline.RequestCtx, parsed *parser.ParsedR
 			blockRules = append(blockRules, ruleName)
 			blockPatterns = append(blockPatterns, f.Finding.Pattern)
 			bumpCount(&highCount, &medCount, &lowCount, f.Finding.Severity)
+		case policy.ActionRedact:
+			f.Rule = ruleName
+			kept = append(kept, f)
+			bumpCount(&highCount, &medCount, &lowCount, f.Finding.Severity)
+			key := redactKey{role: f.Role, index: f.MessageIndex, text: f.SegmentText}
+			if _, ok := redByKey[key]; !ok {
+				redByKey[key] = &parser.Redaction{Role: f.Role, Index: f.MessageIndex, Content: f.SegmentText}
+				redOrder = append(redOrder, key)
+			}
+			redByKey[key].Spans = append(redByKey[key].Spans,
+				parser.Span{Offset: f.Finding.Offset, Length: f.Finding.Length})
 		case policy.ActionWarn:
 			fallthrough
 		default:
@@ -228,6 +251,29 @@ func (s *Stage) decideWithPolicy(rc *pipeline.RequestCtx, parsed *parser.ParsedR
 			"block_rules", blockRules,
 			"patterns", blockPatterns)
 		return pipeline.Block, nil
+	}
+
+	if len(redByKey) > 0 {
+		body, _ := rc.Metadata["body"].([]byte)
+		var reds []parser.Redaction
+		for _, k := range redOrder {
+			reds = append(reds, *redByKey[k])
+		}
+		newBody, rerr := parser.RedactRequest(rc.Host, rc.Req.URL.Path, body, reds)
+		if rerr != nil {
+			s.log.Warn("secretscan redact failed; blocking (fail-closed)",
+				"request_id", requestID, "err", rerr.Error())
+			rc.Metadata["secretscan.findings"] = kept
+			return pipeline.Block, nil
+		}
+		rc.Metadata["body"] = newBody
+		rc.Metadata["secretscan.findings"] = kept
+		s.log.Info("secretscan redacted",
+			"request_id", requestID,
+			"vendor", parsed.Vendor,
+			"endpoint", parsed.Endpoint,
+			"redactions", len(reds))
+		return pipeline.Modify, nil
 	}
 
 	s.log.Info("secretscan findings",
