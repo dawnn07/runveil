@@ -127,7 +127,11 @@ rules:
 ```
 
 Each rule has a `match` clause and an `action`. Rules are evaluated in
-order; the first match wins. Actions are `allow`, `warn`, or `block`.
+order; the first match wins. Actions are `allow`, `warn`, `block`, or
+`redact`. `redact` strips the matched secret from the request (replacing
+it with `[REDACTED]`) and forwards the rest; if it cannot be applied
+safely the request is blocked instead. Redaction currently covers
+Anthropic `/v1/messages`; on other endpoints a `redact` rule blocks.
 
 A few useful matchers:
 
@@ -142,6 +146,11 @@ rules:
   - name: block-payments-code
     match: {path: "**/payments/**"}
     action: block
+
+  # Strip detected secrets but let the request proceed (Anthropic)
+  - name: redact-secrets
+    match: {pattern: aws_*}
+    action: redact
 
   # Warn on everything else (so it shows up in the audit log)
   - name: catch-all

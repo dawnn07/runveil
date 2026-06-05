@@ -361,3 +361,61 @@ func TestEnrichedFinding_MarshalJSON_IncludesDetector(t *testing.T) {
 		t.Errorf("expected detector field in output; got %s", string(data))
 	}
 }
+
+func TestProcess_RedactModifiesBody(t *testing.T) {
+	pol, err := policy.LoadFromBytes([]byte(`
+version: 1
+rules:
+  - name: redact-aws
+    match: {pattern: aws_*}
+    action: redact
+`))
+	if err != nil {
+		t.Fatalf("load policy: %v", err)
+	}
+	s := New(Config{Policies: policy.NewProvider(pol)}, discardLogger())
+
+	body := `{"messages":[{"role":"user","content":"key AKIAIOSFODNN7EXAMPLE end"}]}`
+	rc := newRC(t, "api.anthropic.com", body, http.MethodPost, "/v1/messages")
+
+	dec, err := s.Process(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("Process err = %v", err)
+	}
+	if dec != pipeline.Modify {
+		t.Fatalf("decision = %v, want Modify", dec)
+	}
+	got, _ := rc.Metadata["body"].([]byte)
+	if strings.Contains(string(got), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret not redacted from metadata body: %s", got)
+	}
+	if !strings.Contains(string(got), "[REDACTED]") {
+		t.Errorf("mask missing: %s", got)
+	}
+}
+
+func TestProcess_RedactUnredactableFailsClosed(t *testing.T) {
+	pol, err := policy.LoadFromBytes([]byte(`
+version: 1
+rules:
+  - name: redact-aws
+    match: {pattern: aws_*}
+    action: redact
+`))
+	if err != nil {
+		t.Fatalf("load policy: %v", err)
+	}
+	s := New(Config{Policies: policy.NewProvider(pol)}, discardLogger())
+
+	// Secret only inside a tool_use input → RedactRequest errors → Block.
+	body := `{"messages":[{"role":"assistant","content":[{"type":"tool_use","name":"Read","input":{"k":"AKIAIOSFODNN7EXAMPLE"}}]}]}`
+	rc := newRC(t, "api.anthropic.com", body, http.MethodPost, "/v1/messages")
+
+	dec, err := s.Process(context.Background(), rc)
+	if err != nil {
+		t.Fatalf("Process err = %v", err)
+	}
+	if dec != pipeline.Block {
+		t.Fatalf("decision = %v, want Block (fail-closed)", dec)
+	}
+}

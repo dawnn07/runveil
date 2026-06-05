@@ -17,9 +17,10 @@ import (
 type Action int
 
 const (
-	ActionWarn  Action = iota // default
-	ActionAllow               // suppress this finding
-	ActionBlock               // halt the request
+	ActionWarn   Action = iota // default
+	ActionAllow                // suppress this finding
+	ActionBlock                // halt the request
+	ActionRedact               // mask matched secret(s), forward the rest
 )
 
 // String returns a stable lowercase name for logs and JSON.
@@ -31,6 +32,8 @@ func (a Action) String() string {
 		return "block"
 	case ActionWarn:
 		return "warn"
+	case ActionRedact:
+		return "redact"
 	default:
 		return "unknown"
 	}

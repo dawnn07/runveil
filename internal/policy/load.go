@@ -109,10 +109,12 @@ func parseAction(s string) (Action, error) {
 		return ActionBlock, nil
 	case "warn":
 		return ActionWarn, nil
+	case "redact":
+		return ActionRedact, nil
 	case "":
 		return 0, fmt.Errorf("action is required")
 	default:
-		return 0, fmt.Errorf("invalid action %q, must be one of: allow, block, warn", s)
+		return 0, fmt.Errorf("invalid action %q, must be one of: allow, block, warn, redact", s)
 	}
 }
 

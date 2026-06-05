@@ -112,6 +112,13 @@ func (s *Server) newHandler(host, requestID string) http.Handler {
 			return
 		}
 
+		// A stage (e.g. redact) may have replaced the body in metadata.
+		// Forward the replaced bytes; ContentLength below is recomputed
+		// from len(body).
+		if mb, ok := rc.Metadata["body"].([]byte); ok {
+			body = mb
+		}
+
 		target, err := s.resolveUpstream(host)
 		if err != nil {
 			writeJSONResp(w, http.StatusBadGateway, "resolve upstream failed", "host", host, "detail", err.Error())
