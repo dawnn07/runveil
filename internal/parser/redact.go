@@ -29,20 +29,47 @@ type Redaction struct {
 	Spans   []Span
 }
 
-// RedactRequest returns body with every Redaction's spans masked. v1
-// supports only Anthropic /v1/messages. It rebuilds losslessly: only the
-// matched content strings are re-encoded; all other bytes pass through.
-// Returns an error (caller must fail closed) when the endpoint is
-// unsupported, the JSON is malformed, or any redaction cannot be applied
-// (its content is not found as redactable prose).
+// RedactRequest returns body with every Redaction's spans masked. It
+// rebuilds losslessly: only the matched content strings are re-encoded;
+// all other bytes pass through. Returns an error (caller must fail closed)
+// when the endpoint is unsupported, the JSON is malformed, or any
+// redaction cannot be applied (its content is not found as redactable
+// prose).
 func RedactRequest(host, path string, body []byte, reds []Redaction) ([]byte, error) {
-	if host != "api.anthropic.com" || path != "/v1/messages" {
-		return nil, fmt.Errorf("redact: unsupported endpoint %s%s", host, path)
-	}
 	if len(reds) == 0 {
 		return body, nil
 	}
-	return redactAnthropic(body, reds)
+	switch {
+	case host == "api.anthropic.com" && path == "/v1/messages":
+		return redactAnthropic(body, reds)
+	case host == "api.openai.com" && path == "/v1/chat/completions":
+		return redactOpenAIChat(body, reds)
+	default:
+		return nil, fmt.Errorf("redact: unsupported endpoint %s%s", host, path)
+	}
+}
+
+// redactOpenAIChat rebuilds an OpenAI /v1/chat/completions body with reds
+// applied to message prose. tool_calls are left untouched.
+func redactOpenAIChat(body []byte, reds []Redaction) ([]byte, error) {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(body, &top); err != nil {
+		return nil, fmt.Errorf("redact: decode body: %w", err)
+	}
+	applied := make([]bool, len(reds))
+	if msgsRaw, ok := top["messages"]; ok {
+		newMsgs, err := redactMessageArray(msgsRaw, reds, applied, openAITextTypes)
+		if err != nil {
+			return nil, err
+		}
+		top["messages"] = newMsgs
+	}
+	for k, done := range applied {
+		if !done {
+			return nil, fmt.Errorf("redact: content for %s[%d] not found as redactable prose", reds[k].Role, reds[k].Index)
+		}
+	}
+	return json.Marshal(top)
 }
 
 // applySpans masks each span in content (right-to-left so offsets do not
