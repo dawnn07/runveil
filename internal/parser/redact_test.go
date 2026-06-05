@@ -2,7 +2,6 @@ package parser
 
 import (
 	"encoding/json"
-	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -103,9 +102,102 @@ func TestRedact_ToolUseTargetIsError(t *testing.T) {
 }
 
 func TestRedact_NonAnthropicIsError(t *testing.T) {
-	r := httptest.NewRequest("POST", "https://api.openai.com/v1/chat/completions", nil)
-	_, err := RedactRequest("api.openai.com", r.URL.Path, []byte(`{"messages":[]}`), []Redaction{red("user", 0, "x", 0, 1)})
+	_, err := RedactRequest("api.openai.com", "/v1/embeddings", []byte(`{"input":"x"}`), []Redaction{red("user", 0, "x", 0, 1)})
 	if err == nil {
-		t.Error("expected error for non-Anthropic endpoint in v1")
+		t.Error("expected error for an unsupported endpoint")
+	}
+}
+
+func TestRedact_OpenAIChat_StringContent(t *testing.T) {
+	host, path := "api.openai.com", "/v1/chat/completions"
+	body := []byte(`{"model":"gpt-4o","temperature":0.7,"messages":[{"role":"user","content":"key AKIAIOSFODNN7EXAMPLE end"}]}`)
+	out, err := RedactRequest(host, path, body, []Redaction{red("user", 0, "key AKIAIOSFODNN7EXAMPLE end", 4, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived: %s", out)
+	}
+	if !strings.Contains(string(out), "[REDACTED]") {
+		t.Errorf("mask missing: %s", out)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	if string(m["temperature"]) != "0.7" {
+		t.Errorf("temperature corrupted: %s", m["temperature"])
+	}
+}
+
+func TestRedact_OpenAIChat_InputTextPart(t *testing.T) {
+	host, path := "api.openai.com", "/v1/chat/completions"
+	body := []byte(`{"messages":[{"role":"user","content":[{"type":"input_text","text":"tok AKIAIOSFODNN7EXAMPLE"},{"type":"image_url","image_url":{"url":"http://x"}}]}]}`)
+	out, err := RedactRequest(host, path, body, []Redaction{red("user", 0, "tok AKIAIOSFODNN7EXAMPLE", 4, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived: %s", out)
+	}
+	if !strings.Contains(string(out), "image_url") {
+		t.Errorf("non-text part lost: %s", out)
+	}
+}
+
+func TestRedact_OpenAIChat_ToolArgsTargetIsError(t *testing.T) {
+	host, path := "api.openai.com", "/v1/chat/completions"
+	body := []byte(`{"messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{\"k\":\"AKIAIOSFODNN7EXAMPLE\"}"}}]}]}`)
+	_, err := RedactRequest(host, path, body, []Redaction{red("assistant", 0, `{"k":"AKIAIOSFODNN7EXAMPLE"}`, 6, 20)})
+	if err == nil {
+		t.Error("expected fail-closed error: tool_calls arguments not redactable here")
+	}
+}
+
+func TestRedact_OpenAIResponses_Instructions(t *testing.T) {
+	host, path := "api.openai.com", "/v1/responses"
+	body := []byte(`{"instructions":"sys AKIAIOSFODNN7EXAMPLE","input":"hello"}`)
+	out, err := RedactRequest(host, path, body, []Redaction{red("system", -1, "sys AKIAIOSFODNN7EXAMPLE", 4, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived in instructions: %s", out)
+	}
+}
+
+func TestRedact_OpenAIResponses_InputString(t *testing.T) {
+	host, path := "api.openai.com", "/v1/responses"
+	body := []byte(`{"input":"key AKIAIOSFODNN7EXAMPLE end"}`)
+	out, err := RedactRequest(host, path, body, []Redaction{red("user", 0, "key AKIAIOSFODNN7EXAMPLE end", 4, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived in input: %s", out)
+	}
+}
+
+func TestRedact_OpenAIResponses_InputArrayItem(t *testing.T) {
+	host, path := "api.openai.com", "/v1/responses"
+	body := []byte(`{"input":[{"role":"user","content":[{"type":"input_text","text":"tok AKIAIOSFODNN7EXAMPLE"}]}]}`)
+	out, err := RedactRequest(host, path, body, []Redaction{red("user", 0, "tok AKIAIOSFODNN7EXAMPLE", 4, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived in input item: %s", out)
+	}
+}
+
+func TestRedact_OpenAIResponses_FunctionCallOutput(t *testing.T) {
+	host, path := "api.openai.com", "/v1/responses"
+	body := []byte(`{"input":[{"type":"function_call_output","output":"res AKIAIOSFODNN7EXAMPLE done"}]}`)
+	out, err := RedactRequest(host, path, body, []Redaction{red("tool", 0, "res AKIAIOSFODNN7EXAMPLE done", 4, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived in function_call_output: %s", out)
 	}
 }
