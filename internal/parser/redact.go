@@ -53,7 +53,7 @@ func RedactRequest(host, path string, body []byte, reds []Redaction) ([]byte, er
 }
 
 // redactOpenAIChat rebuilds an OpenAI /v1/chat/completions body with reds
-// applied to message prose. tool_calls are left untouched.
+// applied to message prose and tool_calls arguments.
 func redactOpenAIChat(body []byte, reds []Redaction) ([]byte, error) {
 	var top map[string]json.RawMessage
 	if err := json.Unmarshal(body, &top); err != nil {
@@ -61,9 +61,51 @@ func redactOpenAIChat(body []byte, reds []Redaction) ([]byte, error) {
 	}
 	applied := make([]bool, len(reds))
 	if msgsRaw, ok := top["messages"]; ok {
-		newMsgs, err := redactMessageArray(msgsRaw, reds, applied, openAITextTypes)
+		var msgs []json.RawMessage
+		if err := json.Unmarshal(msgsRaw, &msgs); err != nil {
+			return nil, fmt.Errorf("redact: decode messages: %w", err)
+		}
+		for i := range msgs {
+			var msg map[string]json.RawMessage
+			if err := json.Unmarshal(msgs[i], &msg); err != nil {
+				return nil, fmt.Errorf("redact: decode message %d: %w", i, err)
+			}
+			role := ""
+			if rRaw, ok := msg["role"]; ok {
+				_ = json.Unmarshal(rRaw, &role)
+			}
+			changed := false
+			if cRaw, ok := msg["content"]; ok {
+				newC, err := redactContent(role, i, cRaw, reds, applied, openAITextTypes)
+				if err != nil {
+					return nil, err
+				}
+				if !bytes.Equal(newC, cRaw) {
+					msg["content"] = newC
+					changed = true
+				}
+			}
+			if tcRaw, ok := msg["tool_calls"]; ok {
+				newTC, tcChanged, err := redactToolCalls(tcRaw, role, i, reds, applied)
+				if err != nil {
+					return nil, err
+				}
+				if tcChanged {
+					msg["tool_calls"] = newTC
+					changed = true
+				}
+			}
+			if changed {
+				reEnc, err := json.Marshal(msg)
+				if err != nil {
+					return nil, fmt.Errorf("redact: re-encode message %d: %w", i, err)
+				}
+				msgs[i] = reEnc
+			}
+		}
+		newMsgs, err := json.Marshal(msgs)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("redact: re-encode messages: %w", err)
 		}
 		top["messages"] = newMsgs
 	}
@@ -145,6 +187,22 @@ func redactOpenAIResponses(body []byte, reds []Redaction) ([]byte, error) {
 							return nil, fmt.Errorf("redact: re-encode input item %d: %w", i, err)
 						}
 						items[i] = reEnc
+					}
+				}
+				if itemType == "function_call" {
+					if argsRaw, ok := item["arguments"]; ok {
+						newArgs, changed, err := redactToolArguments(argsRaw, "assistant", i, reds, applied)
+						if err != nil {
+							return nil, err
+						}
+						if changed {
+							item["arguments"] = newArgs
+							reEnc, err := json.Marshal(item)
+							if err != nil {
+								return nil, fmt.Errorf("redact: re-encode input item %d: %w", i, err)
+							}
+							items[i] = reEnc
+						}
 					}
 				}
 			}
@@ -337,6 +395,99 @@ func redactContent(role string, index int, raw json.RawMessage, reds []Redaction
 		return raw, nil
 	}
 	return json.Marshal(blocks)
+}
+
+// redactToolArguments masks redactions matching (role, index) inside an
+// OpenAI tool-call arguments value. arguments is either a JSON-encoded
+// string whose decoded value is a JSON object, or an inline object. The
+// decoded object bytes are the segment content. The masked result must
+// stay valid JSON or it errors (fail-closed). It is re-encoded in the
+// original wire form. Returns the new arguments and whether it changed.
+func redactToolArguments(argsRaw json.RawMessage, role string, index int, reds []Redaction, applied []bool) (json.RawMessage, bool, error) {
+	if len(argsRaw) == 0 {
+		return argsRaw, false, nil
+	}
+	wasString := false
+	inner := argsRaw
+	var s string
+	if err := json.Unmarshal(argsRaw, &s); err == nil {
+		wasString = true
+		inner = json.RawMessage(s)
+	}
+	newContent, changed, err := maybeRedact(role, index, string(inner), reds, applied)
+	if err != nil {
+		return nil, false, err
+	}
+	if !changed {
+		return argsRaw, false, nil
+	}
+	if !json.Valid([]byte(newContent)) {
+		return nil, false, fmt.Errorf("redact: tool arguments not valid JSON after masking")
+	}
+	if wasString {
+		enc, err := json.Marshal(newContent)
+		if err != nil {
+			return nil, false, err
+		}
+		return enc, true, nil
+	}
+	return json.RawMessage(newContent), true, nil
+}
+
+// redactToolCalls applies redactToolArguments to each function tool-call's
+// arguments in an OpenAI chat tool_calls array. Returns the new array and
+// whether anything changed.
+func redactToolCalls(tcRaw json.RawMessage, role string, index int, reds []Redaction, applied []bool) (json.RawMessage, bool, error) {
+	var calls []json.RawMessage
+	if err := json.Unmarshal(tcRaw, &calls); err != nil {
+		return tcRaw, false, nil
+	}
+	anyChange := false
+	for ci := range calls {
+		var call map[string]json.RawMessage
+		if err := json.Unmarshal(calls[ci], &call); err != nil {
+			continue
+		}
+		fnRaw, ok := call["function"]
+		if !ok {
+			continue
+		}
+		var fn map[string]json.RawMessage
+		if err := json.Unmarshal(fnRaw, &fn); err != nil {
+			continue
+		}
+		argsRaw, ok := fn["arguments"]
+		if !ok {
+			continue
+		}
+		newArgs, changed, err := redactToolArguments(argsRaw, role, index, reds, applied)
+		if err != nil {
+			return nil, false, err
+		}
+		if !changed {
+			continue
+		}
+		fn["arguments"] = newArgs
+		newFn, err := json.Marshal(fn)
+		if err != nil {
+			return nil, false, err
+		}
+		call["function"] = newFn
+		newCall, err := json.Marshal(call)
+		if err != nil {
+			return nil, false, err
+		}
+		calls[ci] = newCall
+		anyChange = true
+	}
+	if !anyChange {
+		return tcRaw, false, nil
+	}
+	newTC, err := json.Marshal(calls)
+	if err != nil {
+		return nil, false, err
+	}
+	return newTC, true, nil
 }
 
 // redactToolUseInput masks redactions matching (role, index) inside a

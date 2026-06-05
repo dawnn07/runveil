@@ -191,12 +191,80 @@ func TestRedact_OpenAIChat_InputTextPart(t *testing.T) {
 	}
 }
 
-func TestRedact_OpenAIChat_ToolArgsTargetIsError(t *testing.T) {
+func TestRedact_OpenAIChat_ToolArgs(t *testing.T) {
 	host, path := "api.openai.com", "/v1/chat/completions"
-	body := []byte(`{"messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{\"k\":\"AKIAIOSFODNN7EXAMPLE\"}"}}]}]}`)
-	_, err := RedactRequest(host, path, body, []Redaction{red("assistant", 0, `{"k":"AKIAIOSFODNN7EXAMPLE"}`, 6, 20)})
+	body := []byte(`{"messages":[{"role":"assistant","content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"f","arguments":"{\"path\":\"/x\",\"token\":\"AKIAIOSFODNN7EXAMPLE\"}"}}]}]}`)
+	content := `{"path":"/x","token":"AKIAIOSFODNN7EXAMPLE"}`
+	// "AKIAIOSFODNN7EXAMPLE" begins at offset 22 in content.
+	out, err := RedactRequest(host, path, body, []Redaction{red("assistant", 0, content, 22, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived in tool args: %s", out)
+	}
+	if !strings.Contains(string(out), "[REDACTED]") {
+		t.Errorf("mask missing: %s", out)
+	}
+	if !json.Valid(out) {
+		t.Errorf("output not valid JSON: %s", out)
+	}
+	if !strings.Contains(string(out), `/x`) {
+		t.Errorf("non-secret arg field lost: %s", out)
+	}
+	var top struct {
+		Messages []struct {
+			ToolCalls []struct {
+				Function struct {
+					Arguments string `json:"arguments"`
+				} `json:"function"`
+			} `json:"tool_calls"`
+		} `json:"messages"`
+	}
+	if err := json.Unmarshal(out, &top); err != nil {
+		t.Fatalf("re-decode: %v", err)
+	}
+	if !json.Valid([]byte(top.Messages[0].ToolCalls[0].Function.Arguments)) {
+		t.Errorf("arguments inner JSON invalid: %q", top.Messages[0].ToolCalls[0].Function.Arguments)
+	}
+}
+
+func TestRedact_OpenAIChat_ToolArgsInlineObject(t *testing.T) {
+	host, path := "api.openai.com", "/v1/chat/completions"
+	body := []byte(`{"messages":[{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"f","arguments":{"token":"AKIAIOSFODNN7EXAMPLE"}}}]}]}`)
+	content := `{"token":"AKIAIOSFODNN7EXAMPLE"}`
+	out, err := RedactRequest(host, path, body, []Redaction{red("assistant", 0, content, 10, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived: %s", out)
+	}
+	if !strings.Contains(string(out), `"arguments":{`) {
+		t.Errorf("inline-object form not preserved: %s", out)
+	}
+}
+
+func TestRedact_OpenAIResponses_FunctionCallArgs(t *testing.T) {
+	host, path := "api.openai.com", "/v1/responses"
+	body := []byte(`{"input":[{"type":"function_call","name":"f","arguments":"{\"token\":\"AKIAIOSFODNN7EXAMPLE\"}"}]}`)
+	content := `{"token":"AKIAIOSFODNN7EXAMPLE"}`
+	out, err := RedactRequest(host, path, body, []Redaction{red("assistant", 0, content, 10, 20)})
+	if err != nil {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(string(out), "AKIAIOSFODNN7EXAMPLE") {
+		t.Errorf("secret survived in function_call args: %s", out)
+	}
+}
+
+func TestRedact_OpenAIChat_ToolArgsInvalidJSONIsError(t *testing.T) {
+	host, path := "api.openai.com", "/v1/chat/completions"
+	body := []byte(`{"messages":[{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"f","arguments":"{\"k\":\"SECRET\"}"}}]}]}`)
+	content := `{"k":"SECRET"}`
+	_, err := RedactRequest(host, path, body, []Redaction{red("assistant", 0, content, 5, 8)})
 	if err == nil {
-		t.Error("expected fail-closed error: tool_calls arguments not redactable here")
+		t.Error("expected error: masking broke tool-args JSON validity")
 	}
 }
 
