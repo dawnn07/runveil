@@ -135,19 +135,6 @@ func parseAuditBytes(data []byte) (records []audit.Record, skipped int) {
 	return records, skipped
 }
 
-func emit(r audit.Record, jsonOut bool) {
-	if jsonOut {
-		raw, err := json.Marshal(r)
-		if err != nil {
-			return
-		}
-		os.Stdout.Write(raw)
-		os.Stdout.Write([]byte("\n"))
-		return
-	}
-	fmt.Println(formatRecord(r))
-}
-
 func formatRecord(r audit.Record) string {
 	statusIcon := "✓"
 	if r.Status >= 400 {

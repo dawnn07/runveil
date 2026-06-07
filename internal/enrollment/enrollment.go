@@ -69,5 +69,5 @@ func Load(dataDir string) (Enrollment, error) {
 	if fs.DeviceToken == "" {
 		return Enrollment{}, fmt.Errorf("%s: missing required field device_token", path)
 	}
-	return Enrollment{OrgID: fs.OrgID, DeviceToken: fs.DeviceToken}, nil
+	return Enrollment(fs), nil
 }

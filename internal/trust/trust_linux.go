@@ -55,8 +55,8 @@ func tryUpdateCACertificates(caPath string) error {
 
 func tryUpdateCACertificatesUninstall(_ string) error {
 	dest := "/usr/local/share/ca-certificates/runveil.crt"
-	exec.Command("rm", "-f", dest).Run()
-	exec.Command("update-ca-certificates", "--fresh").Run()
+	_ = exec.Command("rm", "-f", dest).Run()
+	_ = exec.Command("update-ca-certificates", "--fresh").Run()
 	return nil
 }
 
