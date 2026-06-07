@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -20,9 +21,13 @@ func TestWriteStarterPolicy_FreshFile(t *testing.T) {
 	if !strings.Contains(string(data), "default-warn") {
 		t.Errorf("starter policy missing default-warn rule; got %s", string(data))
 	}
-	info, _ := os.Stat(path)
-	if mode := info.Mode().Perm(); mode != 0o644 {
-		t.Errorf("perms = %o, want 0644", mode)
+	// Windows does not model Unix permission bits (writable files report
+	// 0666), so the 0644 assertion only applies on Unix.
+	if runtime.GOOS != "windows" {
+		info, _ := os.Stat(path)
+		if mode := info.Mode().Perm(); mode != 0o644 {
+			t.Errorf("perms = %o, want 0644", mode)
+		}
 	}
 }
 
