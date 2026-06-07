@@ -59,18 +59,24 @@ func runInit(args []string) {
 		fmt.Printf("CA: generated at %s\n", caInst.RootPath())
 	}
 
-	// Step 2: trust store install (best-effort).
-	installer := trust.New()
-	if err := installer.Install(caInst.RootPath()); err != nil {
-		if errors.Is(err, trust.ErrNeedsManual) {
-			fmt.Printf("trust store: manual install required. Run:\n\n%s\n",
-				trust.ManualInstructions(caInst.RootPath()))
-		} else {
-			fmt.Printf("trust store: install failed: %v\nYou can run manually:\n\n%s\n",
-				err, trust.ManualInstructions(caInst.RootPath()))
-		}
+	// Step 2: trust store install (best-effort). RUNVEIL_SKIP_TRUST=1
+	// skips it entirely — useful in CI/containers where modifying the OS
+	// trust store is impossible or undesirable.
+	if os.Getenv("RUNVEIL_SKIP_TRUST") == "1" {
+		fmt.Println("trust store: skipped (RUNVEIL_SKIP_TRUST=1)")
 	} else {
-		fmt.Println("trust store: installed")
+		installer := trust.New()
+		if err := installer.Install(caInst.RootPath()); err != nil {
+			if errors.Is(err, trust.ErrNeedsManual) {
+				fmt.Printf("trust store: manual install required. Run:\n\n%s\n",
+					trust.ManualInstructions(caInst.RootPath()))
+			} else {
+				fmt.Printf("trust store: install failed: %v\nYou can run manually:\n\n%s\n",
+					err, trust.ManualInstructions(caInst.RootPath()))
+			}
+		} else {
+			fmt.Println("trust store: installed")
+		}
 	}
 
 	// Step 3: starter policy.

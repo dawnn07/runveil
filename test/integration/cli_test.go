@@ -20,6 +20,12 @@ import (
 var runveilBin string
 
 func TestMain(m *testing.M) {
+	// Integration tests run `runveil init` many times; skip the OS
+	// trust-store install so they never touch (or hang on) the host's
+	// trust store. Real trust install is covered by the trust package's
+	// own integration test. Child processes inherit this env.
+	os.Setenv("RUNVEIL_SKIP_TRUST", "1")
+
 	tmpDir, err := os.MkdirTemp("", "runveil-bin-")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "TestMain: MkdirTemp: %v\n", err)

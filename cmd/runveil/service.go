@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -68,9 +69,11 @@ func serviceEnvLines(cfg serviceConfig) []string {
 func serviceFilePath(goos, home string) (string, error) {
 	switch goos {
 	case "linux":
-		return filepath.Join(home, ".config", "systemd", "user", "runveil.service"), nil
+		// path.Join (not filepath.Join) so these target-OS unix paths use
+		// forward slashes regardless of the host running the command.
+		return path.Join(home, ".config", "systemd", "user", "runveil.service"), nil
 	case "darwin":
-		return filepath.Join(home, "Library", "LaunchAgents", "com.runveil.proxy.plist"), nil
+		return path.Join(home, "Library", "LaunchAgents", "com.runveil.proxy.plist"), nil
 	default:
 		return "", fmt.Errorf("unsupported OS %q for automatic service install", goos)
 	}
