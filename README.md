@@ -22,6 +22,18 @@ strangers.
 
 ## Install
 
+### Install script (easiest)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/dawnn07/runveil/main/install.sh | sh
+```
+
+Detects your OS/arch, downloads the matching release binary, verifies its
+SHA-256 checksum, and installs it (to `/usr/local/bin` if writable, else
+`~/.local/bin`; override with `RUNVEIL_INSTALL_DIR`). Pin a version with
+`RUNVEIL_VERSION=v0.1.0`. Requires a published release. Then run
+`runveil init`.
+
 ### Prebuilt binary (recommended)
 
 Download the archive for your platform from the
