@@ -43,10 +43,9 @@ jobs:
         with:
           go-version: '1.25.11'
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v8
         with:
-          version: v1.59
-          args: --timeout=5m
+          version: v2.12.2
 
   trust-integration:
     name: trust-store integration (${{ matrix.os }})

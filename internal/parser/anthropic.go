@@ -15,11 +15,6 @@ type anthropicMessage struct {
 	Content json.RawMessage `json:"content"`
 }
 
-type anthropicContentBlock struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-}
-
 func parseAnthropicMessages(body []byte) (*ParsedRequest, error) {
 	var req anthropicMessagesRequest
 	if err := json.Unmarshal(body, &req); err != nil {
