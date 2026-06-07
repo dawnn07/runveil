@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -34,6 +35,9 @@ func TestMain(m *testing.M) {
 	defer os.RemoveAll(tmpDir)
 
 	binName := "runveil"
+	if runtime.GOOS == "windows" {
+		binName += ".exe" // Windows requires the .exe extension to exec
+	}
 	binPath := filepath.Join(tmpDir, binName)
 
 	repoRoot := findRepoRootForCLITests()
