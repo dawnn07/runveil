@@ -11,7 +11,7 @@ import (
 
 // version is the binary version string. May be overridden at build
 // time via -ldflags "-X main.version=$(git describe)".
-var version = "0.1.0"
+var version = "0.1.2"
 
 func main() {
 	if len(os.Args) < 2 {
