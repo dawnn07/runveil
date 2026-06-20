@@ -19,6 +19,7 @@ import (
 
 	"runveil/internal/audit"
 	"runveil/internal/ca"
+	"runveil/internal/config"
 	"runveil/internal/enrollment"
 	"runveil/internal/metrics"
 	"runveil/internal/pipeline"
@@ -83,6 +84,24 @@ func runProxy(args []string) {
 	}
 	logger.Info("audit enrollment", "org_id", enr.OrgID, "enrolled", !enr.IsZero())
 
+	cfg, cerr := config.Load(*dataDir)
+	if cerr != nil {
+		logger.Error("config load failed", "err", cerr.Error())
+		os.Exit(1)
+	}
+	src := resolveSources(sourceInputs{
+		PolicyURLFlag:    *policyURL,
+		SIEMURLFlag:      *siemURL,
+		PolicyHeaderFlag: *policyURLAuthHeader,
+		SIEMHeaderFlag:   *siemAuthHeader,
+		PolicyTokenEnv:   os.Getenv("RUNVEIL_POLICY_TOKEN"),
+		SIEMAuthEnv:      os.Getenv("RUNVEIL_SIEM_AUTH"),
+		ConfigPolicyURL:  cfg.PolicyURL(),
+		ConfigSIEMURL:    cfg.SIEMURL(),
+		ConfigToken:      cfg.DeviceToken,
+		EnrollToken:      enr.DeviceToken,
+	})
+
 	// Resolve audit log path.
 	auditPath := *auditLog
 	if auditPath == "" {
@@ -107,14 +126,11 @@ func runProxy(args []string) {
 
 	// Construct the SIEM sink when --siem-url is set.
 	var siemSink *audit.HTTPSink
-	if *siemURL != "" {
-		if *siemAuthHeader != "" && os.Getenv("RUNVEIL_SIEM_AUTH") == "" {
-			logger.Warn("siem auth header configured but RUNVEIL_SIEM_AUTH is empty")
-		}
+	if src.SIEMURL != "" {
 		sink, err := audit.NewHTTPSink(audit.HTTPConfig{
-			URL:              *siemURL,
-			AuthHeader:       *siemAuthHeader,
-			AuthValue:        os.Getenv("RUNVEIL_SIEM_AUTH"),
+			URL:              src.SIEMURL,
+			AuthHeader:       src.SIEMAuthHeader,
+			AuthValue:        src.SIEMAuthValue,
 			BatchSize:        *siemBatchSize,
 			FlushInterval:    *siemFlushInterval,
 			MaxBufferBatches: *siemMaxBufferBatches,
@@ -225,27 +241,16 @@ func runProxy(args []string) {
 		logger.Info("metrics endpoint listening", "addr", metricsAddr, "path", "/metrics")
 	}
 
-	if *policyURL != "" {
+	if src.PolicyURL != "" {
 		// --- Remote mode: fetch policy from the URL, poll for updates. ---
 		policyMode = "url"
-		policySource = *policyURL
+		policySource = src.PolicyURL
 		cachePath := filepath.Join(*dataDir, "policy-cache.yaml")
 
-		// Auth value precedence: RUNVEIL_POLICY_TOKEN (per-endpoint
-		// override) wins; otherwise fall back to the enrollment device
-		// token; otherwise empty (no auth header is sent).
-		authValue := os.Getenv("RUNVEIL_POLICY_TOKEN")
-		if authValue == "" {
-			authValue = enr.DeviceToken
-		} else if enr.DeviceToken != "" {
-			logger.Debug("RUNVEIL_POLICY_TOKEN overrides device token for policy URL")
-		}
-		if *policyURLAuthHeader != "" && authValue == "" {
-			logger.Warn("policy URL auth header configured but no token available (set RUNVEIL_ORG_ID + RUNVEIL_DEVICE_TOKEN, enroll via device.json, or set RUNVEIL_POLICY_TOKEN)")
-		}
-		src, serr := policy.NewRemoteSource(policy.RemoteConfig{
-			URL:        *policyURL,
-			AuthHeader: *policyURLAuthHeader,
+		authValue := src.PolicyAuthValue
+		remoteSrc, serr := policy.NewRemoteSource(policy.RemoteConfig{
+			URL:        src.PolicyURL,
+			AuthHeader: src.PolicyAuthHeader,
 			AuthValue:  authValue,
 			Interval:   *policyURLInterval,
 			CachePath:  cachePath,
@@ -254,27 +259,27 @@ func runProxy(args []string) {
 			logger.Error("policy URL invalid", "err", serr.Error())
 			os.Exit(1)
 		}
-		initial, ferr := src.Fetch()
+		initial, ferr := remoteSrc.Fetch()
 		if ferr != nil {
 			cached, cerr := policy.LoadFromFile(cachePath)
 			if cerr != nil {
 				logger.Error("policy URL unreachable and no cache available",
-					"url", *policyURL, "cache", cachePath,
+					"url", src.PolicyURL, "cache", cachePath,
 					"url_err", ferr.Error(), "cache_err", cerr.Error())
 				os.Exit(1)
 			}
 			initial = cached
 			logger.Warn("policy URL unreachable at startup; loaded cached policy",
-				"url", *policyURL, "cache", cachePath, "err", ferr.Error())
+				"url", src.PolicyURL, "cache", cachePath, "err", ferr.Error())
 		} else {
-			logger.Info("policy loaded from URL", "url", *policyURL, "rules", initial.RuleCount())
+			logger.Info("policy loaded from URL", "url", src.PolicyURL, "rules", initial.RuleCount())
 		}
 		policies = policy.NewProvider(initial)
-		if err := src.Start(ctx); err != nil {
+		if err := remoteSrc.Start(ctx); err != nil {
 			logger.Error("policy poller start failed", "err", err.Error())
 			os.Exit(1)
 		}
-		defer func() { _ = src.Close() }()
+		defer func() { _ = remoteSrc.Close() }()
 	} else {
 		// --- File mode: load the policy file, watch it for changes. ---
 		loadedPolicy, mode, resolvedPath := resolvePolicy(*policyPath, *dataDir, logger)
