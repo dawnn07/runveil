@@ -23,6 +23,8 @@ func main() {
 		runInit(os.Args[2:])
 	case "logs":
 		runLogs(os.Args[2:])
+	case "enroll":
+		runEnroll(os.Args[2:])
 	case "proxy":
 		runProxy(os.Args[2:])
 	case "service":
@@ -48,6 +50,7 @@ func printUsage() {
 Commands:
   init           First-run setup: generate CA, install trust, write starter policy.
   logs           Stream the audit log (default: tail last 50, --follow for live).
+  enroll         Write control-plane config (URL + device token) for proxy/service.
   proxy          Start the forward HTTPS proxy (foreground).
   service        Install/uninstall the proxy as an always-on background service.
   status         Show config + running-proxy state.

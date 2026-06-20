@@ -214,6 +214,9 @@ func runServiceInstall(args []string) {
 		fmt.Fprintln(os.Stderr, "runveil service: CA not found; run 'runveil init' first")
 		os.Exit(1)
 	}
+	if _, statErr := os.Stat(filepath.Join(*dataDir, "config.json")); os.IsNotExist(statErr) {
+		fmt.Fprintln(os.Stderr, "warning: no config.json found; the service will run in LOCAL mode until you run 'runveil enroll'.")
+	}
 	if err := installService(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "runveil service: install failed: %v\n", err)
 		os.Exit(1)
