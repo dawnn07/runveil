@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"runveil/internal/config"
@@ -21,7 +22,9 @@ func TestWriteConfig_WritesO600(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	// Unix permission bits are not meaningful on Windows (Go reports
+	// 0666/0444 from the read-only attribute), so only assert there.
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("mode = %#o, want 0600", info.Mode().Perm())
 	}
 	var c config.Config

@@ -101,9 +101,11 @@ func TestCLI_Version(t *testing.T) {
 			if code != 0 {
 				t.Errorf("exit code = %d, want 0; stderr=%q", code, stderr)
 			}
-			want := "runveil 0.1.0\n"
-			if stdout != want {
-				t.Errorf("stdout = %q, want %q", stdout, want)
+			// version is injected via -ldflags at release and defaults to
+			// the source value otherwise; assert the format, not a pinned
+			// number, so a version bump doesn't break this test.
+			if !strings.HasPrefix(stdout, "runveil ") || !strings.HasSuffix(stdout, "\n") || strings.TrimSpace(stdout) == "runveil" {
+				t.Errorf("stdout = %q, want \"runveil <version>\\n\"", stdout)
 			}
 			if stderr != "" {
 				t.Errorf("stderr should be empty, got %q", stderr)
